@@ -1,14 +1,14 @@
-# Robust and Label-Efficient Brain MRI Segmentation Under Missing Modalities
+# Segmenting Gliomas When Sequences Are Missing: A Controlled Comparison of Training Strategies for Incomplete Multimodal MRI
 
-Master's thesis (university, program, student, supervisor: unknown, ask). We train a compact 3D U-Net on BraTS 2023 GLI (and MSD Task01 for development) and measure how tumor segmentation degrades when MRI modalities are missing (RQ1 to RQ4 in `context/project-overview.md`). We compare missing-modality strategies fairly, and test label efficiency if time allows. Contribution: a controlled, reproducible, subject-level empirical study. Not a clinical tool.
+Master's thesis (NUST MISIS, Data Science 09.04.01; supervisor Kalitin Denis Vladimirovich; student Qarar Hussain). We train a compact 3D U-Net on BraTS 2023 GLI (and MSD Task01 for development) and measure how tumor segmentation degrades when MRI modalities are missing (RQ1 to RQ4 in `context/project-overview.md`). We compare missing-modality strategies fairly, and test label efficiency if time allows. Contribution: a controlled, reproducible, subject-level empirical study. Not a clinical tool.
 
 ## Stack
 
 - **Language / runtime**: Python 3 with PyTorch and MONAI (versions pinned when the environment is created in milestone 2)
 - **Environment**: uv with a committed lockfile (planned; not created yet)
-- **Writing**: format unknown, ask supervisor (LaTeX XeLaTeX + biblatex is the assumed default); citations in `writing/refs.bib`
+- **Writing**: LaTeX, XeLaTeX with Times New Roman, biblatex + biber, British spelling (university template unknown, ask); citations in `writing/refs.bib`
 - **Web demo**: not planned. If added, it gets its own nested AGENTS.md in `app/`.
-- **Hardware**: 4 GB VRAM GPU (exact model and RAM unknown, ask), Linux. Everything must fit this unless an ADR says otherwise.
+- **Hardware**: Dell Precision 5550, Quadro T2000 Max-Q, 4 GB VRAM, Linux. Everything must fit this unless an ADR says otherwise.
 
 ## Build approach
 
@@ -16,7 +16,8 @@ Tracer Bullet: one thin thread through every layer (data, model, evaluation, wri
 
 ## Commands
 
-    # Writing: not created yet (no document exists)
+    cd writing/proposal && latexmk -xelatex proposal.tex   # build the proposal PDF
+    latexmk -C                                             # clean build files (same folder)
     # Experiments, tests, lint: not created yet (milestone 2 adds them here)
 
 ## Specs and decisions

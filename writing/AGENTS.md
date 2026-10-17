@@ -1,11 +1,12 @@
 # writing/
 
 ## Chapter map
-- No document exists yet. Format and template are unknown, ask the supervisor. Each chapter will state which RQs it answers.
-- `refs.bib` is shared (empty now). `figures/` holds generated figures only.
+- `proposal/proposal.tex` is the 7 page proposal (Option B two-tone journal style, burgundy #7A1F3D, all RQs). Build: `cd writing/proposal && latexmk -xelatex proposal.tex`.
+- Thesis chapters are not created yet; university template unknown, ask. Each chapter will state which RQs it answers.
+- `refs.bib` is shared (19 entries, all UNVERIFIED). `figures/` holds generated figures only.
 
 ## Voice and style
-Short plain sentences. "We" for method, passive allowed in results. Pick one spelling variant per document, pending supervisor preference.
+Short plain sentences. "We" for method, passive allowed in results. British spelling (tumour, oedema) in all documents.
 
 ## Citations
 Use keys from `refs.bib` only. No citation without a note in `docs/literature/`. Entries stay unverified until the `researcher` agent checks DOI/arXiv, authors, year, and that the claim is in the paper.

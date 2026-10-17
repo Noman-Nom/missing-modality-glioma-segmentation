@@ -21,14 +21,15 @@ E0 data inspection, E1 complete-input baseline, E2 missing-modality evaluation (
 
 | Item | Answer |
 |---|---|
-| Project title | Robust and Label-Efficient Brain MRI Segmentation Under Missing Modalities |
+| Project title | Segmenting Gliomas When Sequences Are Missing: A Controlled Comparison of Training Strategies for Incomplete Multimodal MRI (earlier working title: Robust and Label-Efficient Brain MRI Segmentation Under Missing Modalities) |
 | Type | Master's thesis / research project |
-| University, program, student, supervisor | unknown, ask |
+| University, program, supervisor | NUST MISIS, College of IT & Computer Science, Dept. of Computer-aided Design and Engineering Design; Data Science 09.04.01; supervisor Kalitin Denis Vladimirovich |
+| Student / roll no. | Qarar Hussain / [to be provided] |
 | One-sentence goal | Build a reproducible brain-tumor segmentation system and study how to keep it reliable when MRI modalities are missing |
 | Research questions | RQ1 to RQ4 above |
 | Main language and stack | Python, PyTorch, MONAI, NiBabel |
-| Writing format | unknown, ask (assumed LaTeX XeLaTeX + biblatex) |
-| Hardware limits | 4 GB VRAM GPU (model unknown), RAM and OS details unknown, ask. Linux |
+| Writing format | LaTeX XeLaTeX + biblatex, Option B (modern two-tone journal, burgundy), British spelling; university template and page limit unknown, ask |
+| Hardware limits | Dell Precision 5550, Quadro T2000 Max-Q, 4 GB VRAM, Linux (RAM to confirm) |
 | Datasets | MSD Task01_BrainTumour; BraTS 2023 GLI (training, validation, 2017 mapping). Licences: to confirm |
 | Sensitive data? | Yes: medical MRI. Never in git |
 | Web demo or app planned? | No |

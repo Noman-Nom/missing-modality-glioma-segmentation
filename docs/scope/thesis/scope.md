@@ -1,4 +1,4 @@
-# Scope: Robust and Label-Efficient Brain MRI Segmentation Under Missing Modalities
+# Scope: Segmenting Gliomas When Sequences Are Missing: A Controlled Comparison of Training Strategies for Incomplete Multimodal MRI
 
 Train a compact 3D U-Net on BraTS 2023 GLI, measure the drop under all missing-modality patterns, compare simple robustness strategies, and optionally study label efficiency.
 

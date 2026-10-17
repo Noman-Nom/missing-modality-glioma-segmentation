@@ -1,4 +1,4 @@
-# Robust and Label-Efficient Brain MRI Segmentation Under Missing Modalities
+# Segmenting Gliomas When Sequences Are Missing: A Controlled Comparison of Training Strategies for Incomplete Multimodal MRI
 
 Master's thesis project. University, program, student and supervisor: not recorded yet.
 
