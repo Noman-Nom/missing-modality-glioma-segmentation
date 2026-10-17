@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Blocks secrets, MRI data and large files; runs ruff on staged Python if installed.
+set -u
+fail=0
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+while IFS= read -r f; do
+  case "$f" in
+    .env|*/.env|*.pem) echo "BLOCKED secret file: $f"; fail=1 ;;
+    *.nii|*.nii.gz|*.dcm) echo "BLOCKED MRI data file: $f"; fail=1 ;;
+    data/raw/*|data/processed/*)
+      [ "$(basename "$f")" = ".gitkeep" ] || { echo "BLOCKED data file: $f"; fail=1; } ;;
+  esac
+  if [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 5000000 ]; then
+    echo "BLOCKED file over 5 MB: $f"; fail=1
+  fi
+done <<< "$staged"
+
+py=$(echo "$staged" | grep -E '\.py$' || true)
+if [ -n "$py" ] && command -v ruff >/dev/null 2>&1; then
+  echo "$py" | xargs ruff check || fail=1
+fi
+
+exit $fail

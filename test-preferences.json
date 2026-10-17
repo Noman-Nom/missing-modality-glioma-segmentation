@@ -1,0 +1,9 @@
+{
+  "tool": "pytest",
+  "gate": null,
+  "additionalTools": ["hypothesis"],
+  "e2eTool": null,
+  "testDir": "tests",
+  "filePattern": "test_*.py",
+  "packageManager": "uv"
+}

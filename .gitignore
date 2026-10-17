@@ -1,0 +1,50 @@
+# secrets
+.env
+*.pem
+
+# data (MRI never goes in git)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.nii
+*.nii.gz
+*.dcm
+
+# model weights and big outputs
+*.pt
+*.pth
+*.ckpt
+results/*
+!results/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# node (app/)
+node_modules/
+dist/
+
+# latex build artefacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.toc
+*.xdv
+*-SAVE-ERROR
+build.log
+
+# editor / OS
+.vscode/
+.DS_Store

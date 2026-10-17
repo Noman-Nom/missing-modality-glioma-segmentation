@@ -1,0 +1,32 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  writing-pdf:
+    runs-on: ubuntu-latest
+    if: hashFiles('writing/proposal/proposal.tex') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install TeX Live
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y texlive-xetex texlive-latex-extra texlive-fonts-recommended texlive-bibtex-extra biber latexmk fonts-liberation fonts-dejavu fonts-crosextra-carlito
+      - name: Build proposal (Liberation Serif stands in for Times New Roman)
+        working-directory: writing/proposal
+        run: |
+          sed -i 's/\\setmainfont{Times New Roman}/\\setmainfont{Liberation Serif}/' proposal.tex
+          latexmk -xelatex -interaction=nonstopmode -halt-on-error proposal.tex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proposal-pdf
+          path: writing/proposal/proposal.pdf
+
+  python:
+    runs-on: ubuntu-latest
+    if: hashFiles('pyproject.toml') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -m "not slow"
