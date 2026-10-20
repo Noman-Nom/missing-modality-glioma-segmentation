@@ -1,0 +1,15 @@
+[project]
+name = "qarar-research"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "monai>=1.6.1",
+    "nibabel>=5.4.2",
+    "torch>=2.14.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]

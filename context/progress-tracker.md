@@ -14,7 +14,8 @@
 - Open marker: roll number [to be provided]. Dataset counts, licences, ethics and schedule are stated as plans to be recorded by the data audit and data card.
 
 ## In progress
-- Milestone 0 (data audit): full run done 2026-10-20 (1470 cases clean, findings in `data/DATA.md`). Split written (`data/splits/splits.csv`, check passes). Open: sha256, licence, view the 4 odd FLAIR cases, MSD overlap, ADR for the environment.
+- Milestone 0 (data audit): full run done 2026-10-20 (1470 cases clean, findings in `data/DATA.md`). Split written (`data/splits/splits.csv`, check passes). Open: sha256, licence, view the 4 odd FLAIR cases, MSD overlap.
+- Milestone 2, step 1: ADR `docs/architecture/decisions/0001-python-environment.md` written (Proposed). Human installed uv 0.13.2, torch 2.14.1+cu130, monai 1.6.1, nibabel 5.4.2; GPU check passed (sm_75 present). Next: `tests/test_env_smoke.py` (U-Net pass with AMP and peak memory, toy Dice/HD95).
 
 ## Next
 - Supervisor reads the proposal; fill roll number.
