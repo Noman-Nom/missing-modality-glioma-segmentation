@@ -14,7 +14,7 @@
 - Open marker: roll number [to be provided]. Dataset counts, licences, ethics and schedule are stated as plans to be recorded by the data audit and data card.
 
 ## In progress
-- Nothing.
+- Milestone 0 (data audit): full run done 2026-10-20 (1470 cases clean, findings in `data/DATA.md`). Split written (`data/splits/splits.csv`, check passes). Open: sha256, licence, view the 4 odd FLAIR cases, MSD overlap, ADR for the environment.
 
 ## Next
 - Supervisor reads the proposal; fill roll number.
