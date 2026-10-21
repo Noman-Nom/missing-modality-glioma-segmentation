@@ -1,7 +1,7 @@
 # 0001. Use uv with a lockfile, PyTorch (CUDA 13.0 wheel), MONAI and NiBabel
 
 **Date**: 2026-10-20
-**Status**: Accepted (AC-1 partly, AC-2 and AC-5 done 2026-10-20; AC-3 and AC-4 wait for the smoke test)
+**Status**: Accepted (AC-2 and AC-5 done 2026-10-20; AC-3 and AC-4 done 2026-10-21 by `tests/test_env_smoke.py`; AC-1 `uv sync --frozen` rebuild not yet checked)
 
 ## Summary
 
@@ -69,7 +69,7 @@ Option 2 is the documented fallback if AC-2 fails (no `sm_75` in the arch list).
 
 Environment rules:
 - Python 3.12, pinned in `pyproject.toml` (`requires-python = ">=3.12,<3.13"`) and `.python-version`.
-- Direct dependencies: `torch`, `monai`, `nibabel`. Dev group: `pytest`, `ruff`. Add `scipy` only if a MONAI metric import fails without it (the smoke test will show); do not add it speculatively.
+- Direct dependencies: `torch`, `monai`, `nibabel`. Dev group: `pytest`, `ruff`. `scipy` was added 2026-10-21 because MONAI's HD95 needs `scipy.ndimage` (smoke test showed it).
 - No `torchvision`, `torchaudio`, `monai[all]` or other extras. Each extra needs its own reason.
 - The venv path is set with `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/qarar-research` (ext4), and `UV_LINK_MODE=copy`, because the repo drive is NTFS.
 - Commands are run with `uv run`, so the lockfile is always honoured.
@@ -98,8 +98,8 @@ The one open risk is whether the CUDA 13.0 wheel includes kernels for the T2000'
 
 ## Follow-up
 
-- [ ] Human runs the commands below and pastes the smoke test output (last 20 lines at most).
-- [ ] Record resolved versions in `docs/whats-built.md` (AC-5).
+- [x] Human runs the commands below and pastes the smoke test output (last 20 lines at most).
+- [x] Record resolved versions in `docs/whats-built.md` (AC-5).
 - [ ] Update AGENTS.md Stack and Tooling lines (uv installed, versions) via `/sync`.
 - [ ] Add `uv sync --frozen` and `pytest` to `.github/workflows/ci.yml`, CPU only (CI has no GPU).
 - [ ] If AC-2 fails, write ADR 0002 switching to the cu126 index.
