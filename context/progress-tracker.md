@@ -1,7 +1,7 @@
 # Progress Tracker
 **Update this file in the same change that moves the work, not afterwards.**
 **Current phase:** Proposal drafted, waiting on supervisor and missing facts
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-25
 
 ## Done
 ### A. Repo and AI setup (2026-10-17)
@@ -16,6 +16,8 @@
 ## In progress
 - Milestone 0 (data audit): full run done 2026-10-20 (1470 cases clean, findings in `data/DATA.md`). Split written (`data/splits/splits.csv`, check passes). Open: sha256, licence, view the 4 odd FLAIR cases, MSD overlap.
 - Milestone 2, step 1: ADR `docs/architecture/decisions/0001-python-environment.md` written (Proposed). Human installed uv 0.13.2, torch 2.14.1+cu130, monai 1.6.1, nibabel 5.4.2; GPU check passed (sm_75 present). Step 2 done 2026-10-21: `tests/test_env_smoke.py` passes (human ran it). AC-3 peak 144 MiB of 4096; Dice, HD95 and NiBabel pass after `uv add scipy` (1.18.1). ADR 0001 AC-1..AC-5 met except the `uv sync --frozen` rebuild check on a clean checkout. Next: commit, then CI and AGENTS.md lines via `/sync`.
+
+- Milestone 2, step 3: tracer bullet spec `docs/specs/thesis/0001-tracer-bullet/` written and accepted 2026-10-25 (status Proposed until built). Next: `/develop tracer bullet`.
 
 ## Next
 - Supervisor reads the proposal; fill roll number.
