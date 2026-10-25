@@ -12,7 +12,7 @@ Train a compact 3D U-Net on BraTS 2023 GLI, measure the drop under all missing-m
 | A  | Repo, environment, AI setup                          | Foundation | done    |
 | 0  | Dataset inventory and visualisation (E0)             | Slice 1    | planned |
 | 1  | Literature map and verified citations                | Slice 1    | planned |
-| 2  | Tracer bullet: tiny end to end                       | Slice 1    | in-progress |
+| 2  | Tracer bullet: tiny end to end                       | Slice 1    | done    |
 | 3  | Subject-level split and leakage test                 | Slice 2    | planned |
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | planned |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | planned |
@@ -28,7 +28,7 @@ Priority if time is short: 0 to 7 and 11, 12. Features 8 to 10 are extensions.
 
 ## Features
 
-### 2. Tracer bullet: tiny end to end (in-progress)
+### 2. Tracer bullet: tiny end to end (done)
 
 One thin run from raw BraTS files to a LaTeX table, through data, model, evaluation and writing. Spec: [0001](../../specs/thesis/0001-tracer-bullet/index.md).
 Code in `experiments/common/`, `experiments/0002-tracer-bullet/`, `writing/tracer/`.
@@ -40,5 +40,5 @@ Done when: `check_tracer.py` passes on the human's full run and `tracer.pdf` bui
   - [x] Thin thread: `train.py`, `evaluate.py`, `make_table.py`, `writing/tracer/tracer.tex`, one `--quick` run end to end (AC-7, AC-12)
   - [x] Thicken: failure handling, `check_tracer.py`, failure tests (AC-11, AC-13, AC-14)
   - [x] Human full run, numbers recorded in docs (AC-5, AC-6, AC-14)
-- [ ] Verify it: /check verify tracer bullet
-- [ ] Test it: /test tracer bullet
+- [x] Verify it: /check verify tracer bullet
+- [x] Test it: /test tracer bullet

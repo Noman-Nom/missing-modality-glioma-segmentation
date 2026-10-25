@@ -1,7 +1,7 @@
 # 0001. Tracer bullet: one thin end to end run from BraTS files to a thesis table
 
 **Date**: 2026-10-25
-**Status**: In Progress
+**Status**: Accepted
 
 ## Summary
 
