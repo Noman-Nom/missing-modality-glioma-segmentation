@@ -4,10 +4,10 @@
 Code for all experiments: data audit, splits, training, missing-modality evaluation. Shared code is in `common/`; each experiment is an `NNNN-name/` folder.
 
 ## Stack
-Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy. 4 GB GPU: patch training, batch size 1, mixed precision. Versions are pinned in `uv.lock` at the repo root (ADR 0001).
+Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy, pandas. 4 GB GPU: patch training, batch size 1, mixed precision. Versions are pinned in `uv.lock` at the repo root (ADR 0001).
 
 ## Key files
-- `common/data.py` loaders, per-dataset label and channel mapping
+- `common/data.py` loaders, per-dataset label and channel mapping; the one `BRATS_ID_RE` and `ALLOWED_LABELS` (import them, never redefine)
 - `common/missing.py` missing-modality patterns and how a missing channel is represented
 - `common/metrics.py` Dice, sensitivity, precision, HD95 (empty-region rules defined once)
 - `common/seed.py` one function that sets all seeds
@@ -19,6 +19,7 @@ Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy. 4 GB GPU: patch training, batch
 Run from the repo root. Each script's docstring holds its exact run line.
 - Tracer (0002): `uv run python experiments/0002-tracer-bullet/train.py [--quick]`, then `evaluate.py --run <dir>`, `make_table.py --run <dir>`, `check_tracer.py <dir>`.
 - Checks: `check_audit.py`, `check_splits.py`, `check_tracer.py` in each experiment folder.
+- Split reproduce check: `make_splits.py --out <tmp>/splits.csv`, then `check_splits.py --compare <tmp>/splits.csv`. Never regenerate over `data/splits/splits.csv`.
 - Tests import `common` because `pyproject.toml` puts `experiments/` on the pytest path.
 
 ## Conventions
@@ -26,6 +27,7 @@ Run from the repo root. Each script's docstring holds its exact run line.
 - Outputs go only to `results/<experiment>/`. Generated LaTeX tables go to `writing/tables/`.
 - Each run prints the config hash and the git commit.
 - Notebooks may explore, but results come from scripts.
+- Scripts run nothing on import: work goes in `main()` under `if __name__ == "__main__":` (tested in `tests/test_experiment_scripts.py`).
 - Missing-modality patterns are defined before running and evaluated on the same subjects for every method.
 
 ## Import direction

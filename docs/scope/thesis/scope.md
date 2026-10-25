@@ -16,7 +16,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 1  | Literature map and verified citations                | Slice 1    | planned |
 | 2  | Tracer bullet: tiny end to end                       | Slice 1    | done    |
 | 13 | Tracer review fixes                                  | Slice 2    | done    |
-| 3  | Subject-level split and leakage test                 | Slice 2    | in-progress |
+| 3  | Subject-level split and leakage test                 | Slice 2    | done    |
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | planned |
 | 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | planned |
@@ -84,7 +84,7 @@ Code in `experiments/common/`, `experiments/0000-data-audit/`, `experiments/0001
 - [x] Verify it: /check verify tracer review fixes
 - [x] Test it: /test tracer review fixes
 
-### 3. Subject-level split and leakage test (in-progress)
+### 3. Subject-level split and leakage test (done)
 The fixed subject level split already exists (seed 42, 791 / 114 / 228 subjects). What is left is a real pytest check, not only a script.
 Done when: a fast pytest test proves no subject is in two folds and every case appears once, without needing the gitignored `results/` folder.
 Code in `experiments/0001-splits/`, `data/splits/splits.csv`.
