@@ -19,6 +19,8 @@ COLUMNS = ["run_id", "case", "subject", "pattern_id", "pattern", "region", "dice
 FULL_ITERATIONS = 2000  # AC-5
 VRAM_LIMIT_MIB = 4096  # AC-5
 WT_DICE_MIN = 0.3  # AC-6
+# keys of run.json files written before spec 0002; such old runs still pass
+LEGACY_KEYS = {"best_iteration"}
 
 
 class Fail(Exception):
@@ -34,7 +36,9 @@ def structure(run):
     """Checks that hold for quick and full runs. Returns (run.json, metrics rows)."""
     need((run / "run.json").is_file(), "run.json missing")
     rec = load_run(run)
-    need(set(rec) == set(RUN_KEYS), f"run.json keys differ: {sorted(set(rec) ^ set(RUN_KEYS))}")
+    keys = set(rec)
+    need(keys in (set(RUN_KEYS), set(RUN_KEYS) | LEGACY_KEYS),
+         f"run.json keys differ: {sorted(keys ^ set(RUN_KEYS))}")
     need(rec["status"] != "running", "status running with no result (crashed run)")
     need(rec["status"] == "ok", f"status {rec['status']}: {rec['reason']}")
     need((run / "config.toml").is_file(), "config.toml missing")

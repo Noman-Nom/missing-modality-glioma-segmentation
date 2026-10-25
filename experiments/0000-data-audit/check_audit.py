@@ -1,9 +1,14 @@
 """Fast gate: reader works on 3 real cases, synthetic NIfTI round-trips, orientation code is right."""
-import gzip, struct, sys, tempfile
+import gzip
+import struct
+import sys
+import tempfile
 from pathlib import Path
+
 import numpy as np
+
 sys.path.insert(0, str(Path(__file__).parent))
-from audit import read_nifti, axcodes, audit_case
+from audit import audit_case, axcodes, read_nifti
 
 
 def write_nifti(path, arr, sp=(1, 1, 1)):
@@ -25,7 +30,7 @@ def main():
     with tempfile.TemporaryDirectory() as t:
         p = Path(t) / "x.nii.gz"
         write_nifti(p, a)
-        b, sp, aff, dt, _ = read_nifti(p)
+        b, _, _, dt, _ = read_nifti(p)
         assert np.array_equal(a, b) and dt == "float32", "round trip"
     assert axcodes(np.diag([1, 1, 1, 1.0])) == "RAS"
     assert axcodes(np.diag([-1, -1, 1, 1.0])) == "LPS"
@@ -52,4 +57,5 @@ def main():
     print("OK")
 
 
-main()
+if __name__ == "__main__":
+    main()

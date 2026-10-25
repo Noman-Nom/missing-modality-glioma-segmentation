@@ -2,7 +2,10 @@
 
     uv run python experiments/0002-tracer-bullet/evaluate.py --run <run dir>
 Reads the run's config.toml and run.json val_cases (never selects again). Writes metrics.csv there.
-Exit 1 if the run status is not ok or last.pt is missing; 2 if input files are missing.
+Checkpoint rule (spec 0002): a fixed iteration budget, report the final weights (last.pt), no
+checkpoint selection. The val WT Dice in run.json is a learning curve only.
+Exit 1 if the run status is not ok, last.pt is missing, or its config hash differs from run.json;
+2 if input files are missing.
 """
 import argparse
 import csv
@@ -41,6 +44,11 @@ def main(argv=None):
     if not last.is_file():
         print(f"ERROR: {last} missing")
         return 1
+    state = torch.load(last, map_location="cpu")
+    if state["config_hash"] != rec["config_hash"]:
+        print(f"ERROR: last.pt config hash {state['config_hash']} differs from run.json "
+              f"{rec['config_hash']}; nothing evaluated")
+        return 1
     cfg = load_config(a.run / "config.toml")
     data_dir = a.data_dir or rec["data_dir"]
     cases = rec["val_cases"]
@@ -52,7 +60,7 @@ def main(argv=None):
     set_seed(cfg["seed"])
     device = torch.device("cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu")
     model = build_model(cfg).to(device)
-    model.load_state_dict(torch.load(last, map_location=device)["model"])
+    model.load_state_dict(state["model"])
     model.eval()
 
     rows = []

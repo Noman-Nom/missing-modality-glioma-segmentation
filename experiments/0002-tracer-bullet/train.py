@@ -3,8 +3,11 @@
 Run from the repo root:
     uv run python experiments/0002-tracer-bullet/train.py            # full run (human)
     uv run python experiments/0002-tracer-bullet/train.py --quick    # fast gate
-Writes results/0002-tracer-bullet/<run_id>/ with config.toml, run.json, train_log.csv, checkpoints/.
-Exit 0 ok, 1 failed (OOM, non finite loss), 2 bad inputs (before training), 130 Ctrl+C.
+Writes results/0002-tracer-bullet/<run_id>/ with config.toml, run.json, train_log.csv and
+checkpoints/last.pt (the final weights; the only checkpoint, spec 0002). A run id that already
+exists gets a suffix -1, -2, ...
+Exit 0 ok, 1 failed (OOM, non finite loss), 2 bad inputs (before training), 130 Ctrl+C. Any other
+error during training writes status failed, then shows its traceback (nonzero exit).
 Test hook: TRACER_INJECT_INF=1 replaces the input of iteration 1 with inf.
 """
 import argparse
@@ -93,7 +96,7 @@ def train(cfg, rec, run_dir, data_dir, device, gen, cfg_hash, losses):
     scaler = torch.amp.GradScaler(device.type, enabled=amp)
     inject_inf = os.environ.get("TRACER_INJECT_INF") == "1"
     ckpt = run_dir / "checkpoints"
-    best, skipped = None, 0
+    skipped = 0
     batches = cycle(loader)
     t0 = time.time()
     with open(run_dir / "train_log.csv", "w", newline="") as f:
@@ -122,17 +125,33 @@ def train(cfg, rec, run_dir, data_dir, device, gen, cfg_hash, losses):
             val = ""
             if it % t["val_every"] == 0:
                 val = validate(model, val_ds, cfg, device)
-                rec.data["val_wt_dice"].append([it, val])
-                if best is None or val > best:  # a tie keeps the earlier checkpoint
-                    best = val
-                    save_checkpoint(ckpt / "best.pt", model, it, cfg_hash)
-                    rec.update(best_iteration=it)
+                rec.data["val_wt_dice"].append([it, val])  # learning curve only, no selection
                 save_checkpoint(ckpt / "last.pt", model, it, cfg_hash)
             log.writerow([it, losses[-1], ld.item(), lb.item(), opt.param_groups[0]["lr"],
                           round(time.time() - t0, 3), val])
             f.flush()
             rec.update(iterations=it, scaler_skipped_steps=skipped)
     save_checkpoint(ckpt / "last.pt", model, t["iterations"], cfg_hash)
+
+
+def make_run_dir(out, stamp):
+    """Create out/<stamp>, or out/<stamp>-1, -2, ... if taken. Returns (run_id, run_dir)."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    run_id, n = stamp, 0
+    while True:
+        try:
+            (out / run_id).mkdir(exist_ok=False)
+            return run_id, out / run_id
+        except FileExistsError:
+            n += 1
+            run_id = f"{stamp}-{n}"
+
+
+def failed_reason(e):
+    """'<ExceptionType>: <first line of message>', or just the type when the message is empty."""
+    first = (str(e).splitlines() or [""])[0]
+    return f"{type(e).__name__}: {first}" if first else type(e).__name__
 
 
 def main(argv=None):
@@ -164,9 +183,8 @@ def main(argv=None):
 
     gen = set_seed(cfg["seed"])
     device = torch.device("cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu")
-    run_id = f"{datetime.now(UTC):%Y%m%d-%H%M%S}-{cfg_hash[:8]}"
-    run_dir = Path(a.out) / run_id
-    (run_dir / "checkpoints").mkdir(parents=True)
+    run_id, run_dir = make_run_dir(a.out, f"{datetime.now(UTC):%Y%m%d-%H%M%S}-{cfg_hash[:8]}")
+    (run_dir / "checkpoints").mkdir()
     dump_config(cfg, run_dir / "config.toml")
     commit, dirty = git_info()
     rec = RunRecord(
@@ -195,6 +213,9 @@ def main(argv=None):
     except KeyboardInterrupt:
         rec.update(status="interrupted", reason="Ctrl+C")
         code = 130
+    except Exception as e:
+        rec.update(status="failed", reason=failed_reason(e))
+        raise
     finally:
         w, start, end = loss_window(losses)
         rec.update(
@@ -205,12 +226,12 @@ def main(argv=None):
             rec.update(peak_vram_allocated_mib=torch.cuda.max_memory_allocated() / 2**20,
                        peak_vram_reserved_mib=torch.cuda.max_memory_reserved() / 2**20)
         rec.write()
-    r = rec.data
-    print(f"status {r['status']}{': ' + r['reason'] if r['reason'] else ''}  iterations "
-          f"{r['iterations']}  wall {r['wall_time_s']} s  peak reserved "
-          f"{r['peak_vram_reserved_mib'] and round(r['peak_vram_reserved_mib'], 1)} MiB  "
-          f"val WT Dice {r['val_wt_dice'] and round(r['val_wt_dice'][-1][1], 4)}")
-    print(f"run dir {run_dir}")
+        r = rec.data
+        print(f"status {r['status']}{': ' + r['reason'] if r['reason'] else ''}  iterations "
+              f"{r['iterations']}  wall {r['wall_time_s']} s  peak reserved "
+              f"{r['peak_vram_reserved_mib'] and round(r['peak_vram_reserved_mib'], 1)} MiB  "
+              f"val WT Dice {r['val_wt_dice'] and round(r['val_wt_dice'][-1][1], 4)}")
+        print(f"run dir {run_dir}")
     return code
 
 

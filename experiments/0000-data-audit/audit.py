@@ -1,16 +1,14 @@
 """E0 data audit: read every BraTS 2023 GLI volume once and write a per-case table.
 
-Numpy only (no nibabel). Raw data is read only. Outputs go to results/0000-data-audit/.
+The NIfTI reader is numpy only (no nibabel). Raw data is read only. Outputs go to results/0000-data-audit/.
 
 Run (slow, ~10-25 min, human runs it):
-    python3 experiments/0000-data-audit/audit.py \
+    uv run python experiments/0000-data-audit/audit.py \
         --train ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData \
         --val   ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData
 """
 import argparse
 import gzip
-import json
-import re
 import struct
 import sys
 from multiprocessing import Pool
@@ -18,10 +16,12 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.data import BRATS_ID_RE
+
 MODS = ["t1n", "t1c", "t2w", "t2f"]  # BraTS 2023 file suffixes; order here is only for tables
 DTYPES = {2: np.uint8, 4: np.int16, 8: np.int32, 16: np.float32, 64: np.float64,
           256: np.int8, 512: np.uint16, 768: np.uint32}
-ID_RE = re.compile(r"^BraTS-GLI-(\d{5})-(\d{3})$")
 
 
 def read_nifti(path):
@@ -73,7 +73,7 @@ def axcodes(aff):
 
 
 def case_id_parts(cid):
-    m = ID_RE.match(cid)
+    m = BRATS_ID_RE.match(cid)
     return (m.group(1), m.group(2)) if m else (None, None)
 
 
@@ -94,7 +94,8 @@ def audit_case(args):
             continue
         try:
             a, sp, aff, dt, sf = read_nifti(p)
-        except Exception as e:  # corrupt gzip, bad header
+        # the audit must record any unreadable file and continue, whatever the error type
+        except Exception as e:  # noqa: BLE001  corrupt gzip, bad header
             prob.append(f"unreadable {m}: {type(e).__name__}")
             continue
         row[f"{m}_dtype"] = dt

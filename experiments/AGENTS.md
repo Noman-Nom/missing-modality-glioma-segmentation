@@ -32,7 +32,16 @@ Run from the repo root. Each script's docstring holds its exact run line.
 Experiments import from `common/`, never from each other.
 
 ## Naming
-`NNNN-short-name` (E0 to E7 map to the numbers), snake_case modules, region names exactly WT, TC, ET, modality names T1, T1ce, T2, FLAIR.
+`NNNN-short-name`, snake_case modules, region names exactly WT, TC, ET, modality names T1, T1ce, T2, FLAIR.
+
+Folder numbers are build order. E numbers (E0 to E7, defined in `context/project-overview.md`) are thesis labels. This table is the one mapping (spec 0002):
+
+| E number | Thesis label | Folder |
+|---|---|---|
+| E0 | Data inspection | `0000-data-audit` |
+| E1 to E7 | Baseline, missing modality evaluation, strategies, extensions | folder added here when built |
+| none | Infrastructure: subject level split | `0001-splits` |
+| none | Infrastructure: tracer bullet | `0002-tracer-bullet` |
 
 ## Gotchas
 - Label values and channel order must come from the audit, not memory. MSD and BraTS differ.

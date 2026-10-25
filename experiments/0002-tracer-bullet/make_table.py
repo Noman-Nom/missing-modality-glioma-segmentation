@@ -19,12 +19,17 @@ OUT = REPO / "writing" / "tables" / "0002-tracer-bullet.tex"
 
 
 def cell_stats(rows):
-    """Dice mean, Dice median, HD95 mean, HD95 median, empty rule count."""
+    """Dice mean, Dice median, HD95 mean, HD95 median, both empty count, one empty count.
+
+    Both empty: truth and prediction empty (scored Dice 1). One empty: exactly one side empty
+    (scored Dice 0).
+    """
     dice = [float(r["dice"]) for r in rows]
     hd = [float(r["hd95_mm"]) for r in rows]
-    empty = sum(r["gt_empty"] == "True" or r["pred_empty"] == "True" for r in rows)
+    n_empty = [(r["gt_empty"] == "True") + (r["pred_empty"] == "True") for r in rows]
     return (f"{statistics.mean(dice):.3f}", f"{statistics.median(dice):.3f}",
-            f"{statistics.mean(hd):.1f}", f"{statistics.median(hd):.1f}", str(empty))
+            f"{statistics.mean(hd):.1f}", f"{statistics.median(hd):.1f}",
+            str(n_empty.count(2)), str(n_empty.count(1)))
 
 
 def make(run_dir):
@@ -48,12 +53,15 @@ def make(run_dir):
         r"\setlength{\tabcolsep}{3pt}",
         rf"\caption{{Tracer bullet, n = {n_val} val subjects, final checkpoint. Not a result.}}",
         r"\label{tab:tracer}",
-        r"\begin{tabular}{rl" + "rrrrr" * len(REGIONS) + "}",
+        r"\begin{tabular}{rl" + "rrrrrr" * len(REGIONS) + "}",
         r"\toprule",
-        " & & " + " & ".join(rf"\multicolumn{{5}}{{c}}{{{r}}}" for r in REGIONS) + r" \\",
-        "".join(rf"\cmidrule(lr){{{3 + 5 * i}-{7 + 5 * i}}}" for i in range(len(REGIONS))),
+        " & & " + " & ".join(rf"\multicolumn{{6}}{{c}}{{{r}}}" for r in REGIONS) + r" \\",
+        "".join(rf"\cmidrule(lr){{{3 + 6 * i}-{8 + 6 * i}}}" for i in range(len(REGIONS))),
+        # headers on two rows keep the 18 number columns narrow enough for a landscape page
         "ID & Present & " + " & ".join(
-            ["Dice mean & Dice med. & HD95 mean & HD95 med. & Empty"] * len(REGIONS)) + r" \\",
+            ["Dice & Dice & HD95 & HD95 & Both & One"] * len(REGIONS)) + r" \\",
+        " & & " + " & ".join(
+            ["mean & med. & mean & med. & empty & empty"] * len(REGIONS)) + r" \\",
         r"\midrule",
     ]
     for pid, pat in PATTERNS.items():

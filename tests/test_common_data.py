@@ -154,3 +154,42 @@ def test_real_case_through_eval_transforms():
     assert d["image"].shape[1:] == d["label"].shape[1:]
     assert all(s <= o for s, o in zip(d["image"].shape[1:], (240, 240, 155)))
     assert np.isfinite(d["image"]).all()
+
+
+def write_seg(tmp_path, values, dtype):
+    """A synthetic case whose seg holds `values` (other voxels 0), saved with `dtype`."""
+    case = "BraTS-GLI-00001-000"
+    write_case(tmp_path, case)
+    seg = np.zeros((40, 40, 40), dtype)
+    seg.flat[:len(values)] = values
+    nib.save(nib.Nifti1Image(seg, np.eye(4)), tmp_path / case / f"{case}-seg.nii.gz")
+    return case, case_paths(tmp_path, case)
+
+
+# spec 0002, AC-6
+@pytest.mark.parametrize(("values", "dtype", "bad"), [
+    ([1, 2, 3, 4], np.int16, "[4]"),
+    ([1.0, 1.5, 3.0], np.float32, "[1.5]"),
+])
+def test_load_case_rejects_labels_outside_allowed(tmp_path, values, dtype, bad):
+    case, paths = write_seg(tmp_path, values, dtype)
+    with pytest.raises(ValueError, match=rf"{case}: label values outside \[0, 1, 2, 3\]: \{bad}"):
+        load_case(paths)
+
+
+# spec 0002, AC-6: integer by value, not by dtype
+def test_load_case_accepts_float_labels_with_integer_values(tmp_path):
+    _, paths = write_seg(tmp_path, [1.0, 2.0, 3.0], np.float32)
+    _, label, _ = load_case(paths)
+    assert label.dtype == np.int16 and set(np.unique(label)) == {0, 1, 2, 3}
+
+
+# spec 0002, AC-7
+def test_subject_of_valid_id():
+    assert subject_of("BraTS-GLI-00002-001") == "00002"
+
+
+@pytest.mark.parametrize("case", ["BRATS_001", "BraTS-GLI-0002-000", "BraTS-GLI-00002-000.nii.gz"])
+def test_subject_of_rejects_other_ids(case):
+    with pytest.raises(ValueError, match="not a BraTS 2023 GLI case ID"):
+        subject_of(case)

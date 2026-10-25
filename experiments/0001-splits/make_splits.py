@@ -1,12 +1,14 @@
-"""E1 fixed subject-level split of the 1251 labelled BraTS 2023 GLI training cases.
+"""Fixed subject-level split of the 1251 labelled BraTS 2023 GLI training cases.
 
 Reads results/0000-data-audit/cases.csv. Writes data/splits/splits.csv (IDs only, safe to commit).
 Fractions (subjects): train 70%, val 10%, test 20%. Seed 42.
 Strata: WT-volume tertile of the subject (mean over its cases) x "any case without ET".
 All cases of one subject go to the same split (subject = the first number in the case ID).
 The 219 official validation cases have no labels and are NOT used here.
+Infrastructure, no E number (the E number table is in experiments/AGENTS.md).
 """
 import argparse
+
 import numpy as np
 import pandas as pd
 
@@ -29,8 +31,8 @@ def make(cases_csv):
         subs = np.array(sorted(grp.subject))
         rng.shuffle(subs)
         n = len(subs)
-        n_val = int(round(n * FRAC["val"]))
-        n_test = int(round(n * FRAC["test"]))
+        n_val = round(n * FRAC["val"])
+        n_test = round(n * FRAC["test"])
         for i, s in enumerate(subs):
             assign[s] = "test" if i < n_test else "val" if i < n_test + n_val else "train"
     d["fold"] = d.subject.map(assign)

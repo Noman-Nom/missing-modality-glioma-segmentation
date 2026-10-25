@@ -5,6 +5,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "monai>=1.6.1",
     "nibabel>=5.4.2",
+    "pandas>=3.1.0",
     "scipy>=1.18.1",
     "torch>=2.14.1",
 ]
@@ -26,3 +27,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# EXE002: the repo lives on an NTFS drive where every file shows as executable (ADR 0001)
+ignore = ["EXE002"]

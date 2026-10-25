@@ -3,6 +3,7 @@
 Spec 0001, AC-1, AC-2, AC-3. Channel order and labels are per dataset; this file is BraTS 2023 GLI.
 """
 import csv
+import re
 import warnings
 from pathlib import Path
 
@@ -17,6 +18,10 @@ SEG_SUFFIX = "seg"
 # BraTS 2023 GLI labels: 1 NCR, 2 ED, 3 ET
 REGIONS = ("WT", "TC", "ET")
 REGION_LABELS = {"WT": (1, 2, 3), "TC": (1, 3), "ET": (3,)}
+# every value a BraTS 2023 GLI seg may hold (0 background); anything else raises in load_case
+ALLOWED_LABELS = frozenset({0, 1, 2, 3})
+# BraTS-GLI-<5 digit subject>-<3 digit timepoint>
+BRATS_ID_RE = re.compile(r"^BraTS-GLI-(\d{5})-(\d{3})$")
 STD_EPS = 1e-8
 
 
@@ -26,7 +31,10 @@ def label_to_regions(label):
 
 
 def select_subjects(splits_csv, n_train, n_val, timepoint=0, exclude_flair_flag=True):
-    """First N subjects by sorted subject ID per fold, one case each. Returns (train, val) case IDs."""
+    """First N subjects by sorted subject ID per fold, one case each. Returns (train, val) case IDs.
+
+    "First N by sorted ID" is deterministic but not random; revisit when sizing E1.
+    """
     with open(splits_csv, newline="") as f:
         rows = list(csv.DictReader(f))
     keep = [r for r in rows if int(r["timepoint"]) == timepoint
@@ -46,8 +54,11 @@ def select_subjects(splits_csv, n_train, n_val, timepoint=0, exclude_flair_flag=
 
 
 def subject_of(case):
-    """BraTS-GLI-00002-000 -> 00002."""
-    return case.split("-")[2]
+    """BraTS-GLI-00002-000 -> 00002. Any other string raises ValueError."""
+    m = BRATS_ID_RE.match(case)
+    if not m:
+        raise ValueError(f"not a BraTS 2023 GLI case ID: {case!r}")
+    return m.group(1)
 
 
 def case_paths(data_dir, case):
@@ -111,7 +122,15 @@ def load_case(paths):
     """Raw float32 (4, X, Y, Z) stack in MODALITIES order, int label, voxel spacing from seg header."""
     image = np.stack([np.asarray(nib.load(paths[m]).dataobj, dtype=np.float32) for m in MODALITIES])
     seg = nib.load(paths["seg"])
-    label = np.asarray(seg.dataobj).astype(np.int16)
+    raw = np.asarray(seg.dataobj)
+    # by value, not dtype: a scaled NIfTI loads integer labels as float
+    values = np.unique(raw)
+    bad = values[(values != np.round(values)) | ~np.isin(values, list(ALLOWED_LABELS))]
+    if bad.size:
+        case = Path(paths["seg"]).parent.name
+        raise ValueError(f"{case}: label values outside {sorted(ALLOWED_LABELS)}: "
+                         f"{sorted(bad.tolist())}")
+    label = raw.astype(np.int16)
     pixdim = tuple(float(z) for z in seg.header.get_zooms()[:3])
     return image, label, pixdim
 

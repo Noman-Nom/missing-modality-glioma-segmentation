@@ -19,6 +19,8 @@
 
 - Milestone 2, step 3: tracer bullet built (commit `7111e2c`, branch `feat/tracer-bullet`) and full run `20261025-000309-f4bbd0b9` passed `check_tracer.py` on 2026-10-25: 2,000 iterations, 385 s, peak reserved 484 MiB, pattern 1 WT Dice 0.903 (tracer number, not a result). Next: `/check verify tracer bullet`, `/sync`, then commit the docs and open a PR.
 
+- Tracer review fixes (spec 0002, scope feature 13, also closes feature 3) built 2026-10-25 on `feat/tracer-bullet`: pandas 3.1.0 locked, `ruff` clean, `last.pt` only, strict labels and IDs, `failed` on any crash, run id suffix, two empty counts in the table, E number table in `experiments/AGENTS.md`, `tests/test_splits.py`. `uv run pytest -q` 84 passed. Open: the human runs the split reproduce check (spec 0002, AC-2) and records SHA256 and pandas version in `data/DATA.md`; the human rebuilds `tracer.pdf` (AI pre-check built it with 0 overfull warnings). Next: `/check verify tracer review fixes`, then `/test`.
+
 ## Next
 - Supervisor reads the proposal; fill roll number.
 - Milestone 0: extract archives, inventory subjects, load a case from each dataset, confirm channel order, label values and alignment, record in `data/DATA.md`.

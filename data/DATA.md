@@ -35,7 +35,7 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 
 ## Splits (experiment 0001)
 
-`data/splits/splits.csv` (committed, IDs only). Seed 42, subject level, stratified by subject WT-volume tertile x any-empty-ET. The 219 official validation cases have no labels and are not used for scores.
+`data/splits/splits.csv` (committed, IDs only). It holds all 1251 labelled training cases (`N_LABELLED_CASES` in `check_splits.py`). Seed 42, subject level, stratified by subject WT-volume tertile x any-empty-ET. The 219 official validation cases have no labels and are not used for scores.
 
 | fold | subjects | cases | WT median (mL) | empty-ET cases |
 |---|---|---|---|---|
@@ -43,4 +43,6 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 | val | 114 | 129 | 97.1 | 4 |
 | test | 228 | 255 | 90.4 | 7 |
 
-Regenerate: `python3 experiments/0001-splits/make_splits.py`. Check: `python3 experiments/0001-splits/check_splits.py`.
+Regenerate: `uv run python experiments/0001-splits/make_splits.py` (needs `results/0000-data-audit/cases.csv`; if it is missing, rerun the audit first). Check: `uv run python experiments/0001-splits/check_splits.py`. Reproduce check (spec 0002, AC-2), never overwrites the committed file: `uv run python experiments/0001-splits/make_splits.py --out <tmp>/splits.csv`, then `uv run python experiments/0001-splits/check_splits.py --compare <tmp>/splits.csv`.
+
+Reproduced under the locked environment: **not yet checked** (the human runs the reproduce check above). SHA256 of the committed `splits.csv`: to be recorded with that check.

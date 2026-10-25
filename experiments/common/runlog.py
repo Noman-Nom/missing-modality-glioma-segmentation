@@ -13,13 +13,14 @@ import numpy
 import scipy
 import torch
 
-# every key is present in every run.json (null where not yet known); spec 0001, run.json keys
+# every key is present in every run.json (null where not yet known); spec 0001, run.json keys,
+# amended by spec 0002 (best_iteration removed)
 RUN_KEYS = (
     "run_id", "status", "reason", "quick", "config_hash", "git_commit", "git_dirty", "seed",
     "data_dir", "device", "gpu", "versions", "determinism", "nondeterminism_warnings",
     "peak_vram_allocated_mib", "peak_vram_reserved_mib", "wall_time_s", "iterations",
     "scaler_skipped_steps", "loss_window", "loss_start_mean", "loss_end_mean", "val_wt_dice",
-    "best_iteration", "train_cases", "val_cases",
+    "train_cases", "val_cases",
 )
 STATUSES = ("running", "ok", "failed", "interrupted")
 

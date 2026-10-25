@@ -13,7 +13,6 @@ def build_model(cfg):
                 channels=m["channels"], strides=m["strides"], num_res_units=m["num_res_units"])
 
 
-
 @torch.no_grad()
 def predict(model, image, cfg, device):
     """Normalised image (4, X, Y, Z) NumPy -> binary region masks (3, X, Y, Z) NumPy bool.

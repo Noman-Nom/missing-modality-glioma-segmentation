@@ -1,6 +1,6 @@
 # What's built
 
-**Last updated:** 2026-10-25, tracer bullet built and full run passed (spec 0001)
+**Last updated:** 2026-10-25, tracer review fixes built (spec 0002) on top of the tracer bullet (spec 0001)
 **Last full check:** only git and hook checks. Not run: CI, any experiment (none exist), citation verification.
 
 | # | Feature | Status | What it gives you |
@@ -8,9 +8,10 @@
 | A | Repo and AI setup | done | Rules, skills, docs layout, pre-commit hook |
 | B | Proposal | built, not supervisor-reviewed | `writing/proposal/proposal.pdf`, 7 pages |
 | C | Data audit (E0) | done, run on all 1470 cases | `experiments/0000-data-audit/` writes `results/0000-data-audit/cases.csv` and `summary.md` |
-| D | Subject-level split (E1) | done, check passes | `data/splits/splits.csv`, `experiments/0001-splits/` |
+| D | Subject-level split (infrastructure, no E number) | done, check passes, leakage test in `tests/test_splits.py` | `data/splits/splits.csv`, `experiments/0001-splits/` |
 | E | Python environment and smoke test | done, 3 fast + 1 GPU test pass | `pyproject.toml`, `uv.lock`, `tests/test_env_smoke.py` |
 | F | Tracer bullet (spec 0001) | built, full run passes `check_tracer.py`; not yet verified or tested by /check, /test | `experiments/common/`, `experiments/0002-tracer-bullet/`, `writing/tracer/tracer.tex` |
+| G | Tracer review fixes (spec 0002) | built, fast tests and lint green; not yet verified by /check | pandas locked, `ruff` clean, `last.pt` only, strict labels and IDs, `tests/test_splits.py` |
 
 ## A. Repo and AI setup
 Any AI chat reads `AGENTS.md` and starts with the same rules. Enable the hook with `git config core.hooksPath .githooks`.
@@ -19,10 +20,10 @@ Any AI chat reads `AGENTS.md` and starts with the same rules. Enable the hook wi
 Build: `cd writing/proposal && latexmk -xelatex proposal.tex`. Citations are unverified.
 
 ## C. Data audit (E0)
-Run: `python3 experiments/0000-data-audit/audit.py --train <train dir> --val <val dir>` then `python3 experiments/0000-data-audit/summarize.py`. Check: `python3 experiments/0000-data-audit/check_audit.py <train dir>`. Uses numpy only (own NIfTI reader). Full run done 2026-10-20.
+Run: `uv run python experiments/0000-data-audit/audit.py --train <train dir> --val <val dir>` then `uv run python experiments/0000-data-audit/summarize.py`. Check: `uv run python experiments/0000-data-audit/check_audit.py <train dir>`. Own numpy NIfTI reader; case IDs parsed with the shared `BRATS_ID_RE` from `common/data.py`. Full run done 2026-10-20.
 
-## D. Splits (E1)
-`python3 experiments/0001-splits/make_splits.py` writes `data/splits/splits.csv` (train 791 / val 114 / test 228 subjects, seed 42). Check: `python3 experiments/0001-splits/check_splits.py` (no subject in two folds, deterministic, toy case).
+## D. Splits (infrastructure, no E number)
+`uv run python experiments/0001-splits/make_splits.py` writes `data/splits/splits.csv` (train 791 / val 114 / test 228 subjects, seed 42). Check: `uv run python experiments/0001-splits/check_splits.py` (no subject in two folds, deterministic). `--compare <csv>` checks a regenerated split against the committed one without overwriting it. Fast test with no data: `tests/test_splits.py` (toy case, committed split has no leakage). E numbers to folders: the table in `experiments/AGENTS.md`.
 
 ## E. Environment and smoke test (ADR 0001)
 Resolved versions (2026-10-20): Python 3.12.3, torch 2.14.1+cu130 (arch list has `sm_75`), monai 1.6.1, nibabel 5.4.2, scipy 1.18.1 (added 2026-10-21), pytest 9.1.1, ruff 0.17.1, uv 0.13.2.
@@ -35,6 +36,7 @@ Run on 2026-10-21 (human, Quadro T2000 Max-Q):
 - Note: the 2026-10-21 run created `.venv` inside the repo because `UV_PROJECT_ENVIRONMENT` was not set in that shell. It is git-ignored; see ADR 0001 for the intended location.
 
 ## F. Tracer bullet (spec 0001)
+Amended by spec 0002 (section G): only `last.pt` is saved and reported, `run.json` has no `best_iteration`, the table has both empty and one empty counts.
 Shared code in `experiments/common/`: `seed.py` (`set_seed`), `runlog.py` (config hash, git, versions, `run.json`), `data.py` (channel order T1, T1ce, T2, FLAIR by file suffix; WT/TC/ET; subject selection; crop and normalise), `missing.py` (15 patterns), `metrics.py` (empty region rule, HD95 373.13 mm), `model.py` (U-Net and sliding window prediction, shared by validation and evaluation).
 Commands (repo root, `BRATS_TRAIN_DIR` set): `train.py [--quick]`, `evaluate.py --run <dir>`, `make_table.py --run <dir>`, `check_tracer.py <dir>`, all in `experiments/0002-tracer-bullet/`; then `cd writing/tracer && latexmk -xelatex tracer.tex`.
 Fast tests: `uv run pytest -q` gives 30 passed, 2 slow deselected (2026-10-25), including a CPU thread test on synthetic NIfTI cases.
@@ -47,3 +49,15 @@ Full run 2026-10-25 (human, Quadro T2000 Max-Q), run `20261025-000309-f4bbd0b9`,
 - Warnings logged: 2 (a fork with threads warning from the DataLoader, a MONAI deprecation); no determinism warnings.
 - Caveat: `run.json` records git `49f1111` with a dirty tree, because the code was committed afterwards as `7111e2c`. The next real experiment should run from a clean commit.
 - These are tracer numbers on the first 4 val subjects by ID, not results; never quote them.
+
+## G. Tracer review fixes (spec 0002)
+Fixes from the fresh model review (`docs/reviews/2026-10-25-feat-tracer-bullet.md`).
+- Environment: `pandas` 3.1.0 locked (ADR 0001). The audit and split scripts run with `uv run`.
+- Split reproduce check: `make_splits.py --out <tmp>/splits.csv`, then `check_splits.py --compare <tmp>/splits.csv`. AI pre-check 2026-10-25 under pandas 3.1.0: 1251 cases, same fold per case, committed file unchanged. The official record in `data/DATA.md` waits for the human's run.
+- Lint: `uv run ruff check .` passes. `EXE002` is ignored because of the NTFS executable bit (ADR 0001).
+- Checkpoint rule: a fixed iteration budget, report the final weights (`last.pt`), no selection. `evaluate.py` exits 1 when the `last.pt` config hash differs from `run.json`. `check_tracer.py` still accepts old runs that hold `best_iteration` (`LEGACY_KEYS`); the full run `20261025-000309-f4bbd0b9` still prints PASS.
+- Fail loudly: `load_case()` raises `ValueError` on label values outside 0 to 3 or non integer values; `subject_of()` raises on anything that is not `BraTS-GLI-NNNNN-NNN` (`BRATS_ID_RE`, also used by `audit.py`); any crash in training writes status `failed` with the exception type, then re raises.
+- Run ids: a taken run folder gets a suffix `-1`, `-2`, and `run_id` equals the folder name.
+- Table: per region Dice mean and median, HD95 mean and median, Both empty (Dice 1), One empty (Dice 0); headers on two rows so the table fits the landscape page.
+- No script under `experiments/` runs code on import (`check_splits.py`, `check_audit.py`, `summarize.py` now have `main()`).
+- Fast tests: `uv run pytest -q` gives 84 passed, 2 slow deselected (2026-10-25).

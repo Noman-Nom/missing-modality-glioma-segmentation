@@ -69,7 +69,7 @@ Option 2 is the documented fallback if AC-2 fails (no `sm_75` in the arch list).
 
 Environment rules:
 - Python 3.12, pinned in `pyproject.toml` (`requires-python = ">=3.12,<3.13"`) and `.python-version`.
-- Direct dependencies: `torch`, `monai`, `nibabel`. Dev group: `pytest`, `ruff`. `scipy` was added 2026-10-21 because MONAI's HD95 needs `scipy.ndimage` (smoke test showed it).
+- Direct dependencies: `torch`, `monai`, `nibabel`. Dev group: `pytest`, `ruff`. `scipy` was added 2026-10-21 because MONAI's HD95 needs `scipy.ndimage` (smoke test showed it). `pandas` was added 2026-10-25 because the audit and split scripts (`experiments/0000-data-audit/`, `experiments/0001-splits/`) need it (spec 0002).
 - No `torchvision`, `torchaudio`, `monai[all]` or other extras. Each extra needs its own reason.
 - The venv path is set with `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/qarar-research` (ext4), and `UV_LINK_MODE=copy`, because the repo drive is NTFS.
 - Commands are run with `uv run`, so the lockfile is always honoured.
@@ -146,4 +146,4 @@ The AC-3 forward and backward test and the AC-4 toy metric check are written as 
 
 ## Result of the install (2026-10-20, human-run)
 
-uv 0.13.2, CPython 3.12.3. Resolved: torch 2.14.1+cu130, monai 1.6.1, nibabel 5.4.2, numpy 2.5.4, pytest 9.1.1, ruff 0.17.1 (full list in `uv.lock`). `torch.cuda.is_available()` is True and the arch list is `sm_75, sm_80, sm_86, sm_90, sm_100, sm_120`, so the T2000 is covered (AC-2). The cu126 fallback is not needed. `scipy` was not installed; add it only if a metric import fails.
+uv 0.13.2, CPython 3.12.3. Resolved: torch 2.14.1+cu130, monai 1.6.1, nibabel 5.4.2, numpy 2.5.4, pytest 9.1.1, ruff 0.17.1 (full list in `uv.lock`). `torch.cuda.is_available()` is True and the arch list is `sm_75, sm_80, sm_86, sm_90, sm_100, sm_120`, so the T2000 is covered (AC-2). The cu126 fallback is not needed. `scipy` was not in this first install; it was added on 2026-10-21 (see Environment rules), and `pandas` 3.1.0 on 2026-10-25.
