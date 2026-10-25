@@ -1,6 +1,6 @@
 # What's built
 
-**Last updated:** 2026-10-25, tracer bullet built (spec 0001), full run pending
+**Last updated:** 2026-10-25, tracer bullet built and full run passed (spec 0001)
 **Last full check:** only git and hook checks. Not run: CI, any experiment (none exist), citation verification.
 
 | # | Feature | Status | What it gives you |
@@ -10,7 +10,7 @@
 | C | Data audit (E0) | done, run on all 1470 cases | `experiments/0000-data-audit/` writes `results/0000-data-audit/cases.csv` and `summary.md` |
 | D | Subject-level split (E1) | done, check passes | `data/splits/splits.csv`, `experiments/0001-splits/` |
 | E | Python environment and smoke test | done, 3 fast + 1 GPU test pass | `pyproject.toml`, `uv.lock`, `tests/test_env_smoke.py` |
-| F | Tracer bullet (spec 0001) | built, quick run passes; full run not yet done | `experiments/common/`, `experiments/0002-tracer-bullet/`, `writing/tracer/tracer.tex` |
+| F | Tracer bullet (spec 0001) | built, full run passes `check_tracer.py`; not yet verified or tested by /check, /test | `experiments/common/`, `experiments/0002-tracer-bullet/`, `writing/tracer/tracer.tex` |
 
 ## A. Repo and AI setup
 Any AI chat reads `AGENTS.md` and starts with the same rules. Enable the hook with `git config core.hooksPath .githooks`.
@@ -39,4 +39,11 @@ Shared code in `experiments/common/`: `seed.py` (`set_seed`), `runlog.py` (confi
 Commands (repo root, `BRATS_TRAIN_DIR` set): `train.py [--quick]`, `evaluate.py --run <dir>`, `make_table.py --run <dir>`, `check_tracer.py <dir>`, all in `experiments/0002-tracer-bullet/`; then `cd writing/tracer && latexmk -xelatex tracer.tex`.
 Fast tests: `uv run pytest -q` gives 30 passed, 2 slow deselected (2026-10-25), including a CPU thread test on synthetic NIfTI cases.
 Quick run 2026-10-25 (AI, GPU, `--quick`, run `20261024-235630-31b12b4f`, dirty tree): status ok, 10 iterations, 20.2 s, peak reserved 368 MiB, 45 metrics rows, table and `tracer.pdf` build, `check_tracer.py` prints `FAIL: quick run` as designed. These numbers are wiring checks, not results.
-Not done yet: the full 2,000 iteration run (human), so AC-5 and AC-6 are not yet shown.
+Full run 2026-10-25 (human, Quadro T2000 Max-Q), run `20261025-000309-f4bbd0b9`, seed 42:
+- AC-5: 2,000 iterations, wall 385.3 s, peak reserved 484.0 MiB (allocated 209.6 MiB) of 4096.
+- AC-6: mean loss first 50 iterations 1.531, last 50 0.360. Pattern 1 (complete input) mean WT Dice 0.9032 on the 4 val subjects (00017, 00056, 00061, 00070), threshold 0.3.
+- Val WT Dice during training: 0.772 (500), 0.796 (1000), 0.834 (1500), 0.903 (2000); best is the last. GradScaler skipped 5 steps.
+- AC-7, AC-12, AC-13: 180 metrics rows, table built, `tracer.pdf` builds (n = 4), `check_tracer.py` PASS. Slow tests: 2 passed.
+- Warnings logged: 2 (a fork with threads warning from the DataLoader, a MONAI deprecation); no determinism warnings.
+- Caveat: `run.json` records git `49f1111` with a dirty tree, because the code was committed afterwards as `7111e2c`. The next real experiment should run from a clean commit.
+- These are tracer numbers on the first 4 val subjects by ID, not results; never quote them.

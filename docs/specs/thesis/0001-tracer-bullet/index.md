@@ -298,7 +298,7 @@ Tracer Bullet order: first get a thin thread through every layer with `--quick`,
 11. [x] Thicken failures: OOM, non finite loss, Ctrl+C, missing files, atomic checkpoint save, with fast tests in `tests/test_tracer_failures.py` (forced non finite loss, missing file), satisfies **AC-11**
 12. [x] `check_tracer.py`, satisfies **AC-13**
 13. [x] Fast tests in `tests/test_common_data.py`, `test_common_missing.py`, `test_common_metrics.py`, `test_common_seed.py`, plus a `slow` test that runs one real case through the eval transforms and checks shapes, satisfies **AC-1**, **AC-2**, **AC-3**, **AC-4**, **AC-8**, **AC-10**, **AC-14**
-14. Human runs the full chain (commands in [verify.md](verify.md)) and pastes the last two lines of each; record the run id, peak VRAM, wall time and pattern 1 WT Dice in `docs/whats-built.md` and `context/progress-tracker.md`, satisfies **AC-5**, **AC-6**, **AC-14**
+14. [x] Human runs the full chain (commands in [verify.md](verify.md)) and pastes the last two lines of each; record the run id, peak VRAM, wall time and pattern 1 WT Dice in `docs/whats-built.md` and `context/progress-tracker.md`, satisfies **AC-5**, **AC-6**, **AC-14**
 
 ## Consequences
 

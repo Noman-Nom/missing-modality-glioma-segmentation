@@ -35,10 +35,10 @@ Code in `experiments/common/`, `experiments/0002-tracer-bullet/`, `writing/trace
 Done when: `check_tracer.py` passes on the human's full run and `tracer.pdf` builds from the generated table.
 
 - [x] Design it (spec)
-- [ ] Build it: /develop tracer bullet
+- [x] Build it: /develop tracer bullet
   - [x] Shared code in `experiments/common/` (seed, run log, data mapping, preprocessing, missing patterns, metrics) with fast tests (AC-1, AC-2, AC-3, AC-4, AC-8, AC-9, AC-10)
   - [x] Thin thread: `train.py`, `evaluate.py`, `make_table.py`, `writing/tracer/tracer.tex`, one `--quick` run end to end (AC-7, AC-12)
   - [x] Thicken: failure handling, `check_tracer.py`, failure tests (AC-11, AC-13, AC-14)
-  - [ ] Human full run, numbers recorded in docs (AC-5, AC-6, AC-14)
+  - [x] Human full run, numbers recorded in docs (AC-5, AC-6, AC-14)
 - [ ] Verify it: /check verify tracer bullet
 - [ ] Test it: /test tracer bullet
