@@ -193,3 +193,14 @@ def test_subject_of_valid_id():
 def test_subject_of_rejects_other_ids(case):
     with pytest.raises(ValueError, match="not a BraTS 2023 GLI case ID"):
         subject_of(case)
+
+
+# spec 0002, AC-6: the error names the case folder, not the file
+def test_load_case_error_names_the_case_folder(tmp_path):
+    case, paths = write_seg(tmp_path, [4], np.int16)
+    renamed = tmp_path / case / "segmentation.nii.gz"
+    Path(paths["seg"]).rename(renamed)
+    paths = {**paths, "seg": str(renamed)}
+    with pytest.raises(ValueError, match=rf"^{case}: label values") as err:
+        load_case(paths)
+    assert "segmentation" not in str(err.value)

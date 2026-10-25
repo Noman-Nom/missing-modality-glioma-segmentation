@@ -15,7 +15,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 0  | Dataset inventory and visualisation (E0)             | Slice 1    | in-progress |
 | 1  | Literature map and verified citations                | Slice 1    | planned |
 | 2  | Tracer bullet: tiny end to end                       | Slice 1    | done    |
-| 13 | Tracer review fixes                                  | Slice 2    | in-progress |
+| 13 | Tracer review fixes                                  | Slice 2    | done    |
 | 3  | Subject-level split and leakage test                 | Slice 2    | in-progress |
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | planned |
@@ -69,7 +69,7 @@ Done when: `check_tracer.py` passes on the human's full run and `tracer.pdf` bui
 
 ## Slice 2: Clean foundations for E1
 
-### 13. Tracer review fixes (in-progress)
+### 13. Tracer review fixes (done)
 Fix what the fresh model review found before every later experiment builds on `experiments/common/`. Findings: `docs/reviews/2026-10-25-feat-tracer-bullet.md`. Spec: [0002](../../specs/thesis/0002-tracer-review-fixes/index.md). Also closes feature 3.
 Done when: the audit and split scripts run in the locked environment, `uv run ruff check .` is clean, `evaluate.py` and `train.py` agree on which checkpoint counts, unknown label values raise an error, and one E number to folder mapping is used in every doc.
 Code in `experiments/common/`, `experiments/0000-data-audit/`, `experiments/0001-splits/`, `experiments/0002-tracer-bullet/`, `tests/test_splits.py`.
@@ -81,8 +81,8 @@ Code in `experiments/common/`, `experiments/0000-data-audit/`, `experiments/0001
   - [x] Strict shared code: label check, BraTS ID regex, model and docstring cleanups (AC-6, AC-7, AC-14)
   - [x] Tracer pipeline: `last.pt` only, legacy key in `check_tracer`, config hash check, `failed` status, run id suffix, split empty columns (AC-4, AC-4b, AC-5, AC-8, AC-9, AC-12)
   - [x] Docs: E number table, spec 0001 amendment, whats-built and progress tracker (AC-13, AC-15)
-- [ ] Verify it: /check verify tracer review fixes
-- [ ] Test it: /test tracer review fixes
+- [x] Verify it: /check verify tracer review fixes
+- [x] Test it: /test tracer review fixes
 
 ### 3. Subject-level split and leakage test (in-progress)
 The fixed subject level split already exists (seed 42, 791 / 114 / 228 subjects). What is left is a real pytest check, not only a script.

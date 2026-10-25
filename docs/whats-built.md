@@ -11,7 +11,7 @@
 | D | Subject-level split (infrastructure, no E number) | done, check passes, leakage test in `tests/test_splits.py` | `data/splits/splits.csv`, `experiments/0001-splits/` |
 | E | Python environment and smoke test | done, 3 fast + 1 GPU test pass | `pyproject.toml`, `uv.lock`, `tests/test_env_smoke.py` |
 | F | Tracer bullet (spec 0001) | built, full run passes `check_tracer.py`; not yet verified or tested by /check, /test | `experiments/common/`, `experiments/0002-tracer-bullet/`, `writing/tracer/tracer.tex` |
-| G | Tracer review fixes (spec 0002) | built, fast tests and lint green; not yet verified by /check | pandas locked, `ruff` clean, `last.pt` only, strict labels and IDs, `tests/test_splits.py` |
+| G | Tracer review fixes (spec 0002) | built, verified by /check verify and tested by /test (2026-10-25) | pandas locked, `ruff` clean, `last.pt` only, strict labels and IDs, `tests/test_splits.py`, `tests/test_experiment_scripts.py` |
 
 ## A. Repo and AI setup
 Any AI chat reads `AGENTS.md` and starts with the same rules. Enable the hook with `git config core.hooksPath .githooks`.
