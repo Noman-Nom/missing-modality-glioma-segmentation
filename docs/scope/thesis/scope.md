@@ -75,8 +75,8 @@ Done when: the audit and split scripts run in the locked environment, `uv run ru
 Code in `experiments/common/`, `experiments/0000-data-audit/`, `experiments/0001-splits/`, `experiments/0002-tracer-bullet/`, `tests/test_splits.py`.
 
 - [x] Design it (spec): /architect tracer review fixes
-- [ ] Build it: /develop tracer review fixes
-  - [ ] Locked env and splits: pandas, import guards, `--compare`, `tests/test_splits.py`, human split check (AC-1, AC-2, AC-10, AC-11)
+- [x] Build it: /develop tracer review fixes
+  - [x] Locked env and splits: pandas, import guards, `--compare`, `tests/test_splits.py`, human split check (AC-1, AC-2, AC-10, AC-11)
   - [x] Lint clean: `EXE002` ignore, fix the rest (AC-3)
   - [x] Strict shared code: label check, BraTS ID regex, model and docstring cleanups (AC-6, AC-7, AC-14)
   - [x] Tracer pipeline: `last.pt` only, legacy key in `check_tracer`, config hash check, `failed` status, run id suffix, split empty columns (AC-4, AC-4b, AC-5, AC-8, AC-9, AC-12)

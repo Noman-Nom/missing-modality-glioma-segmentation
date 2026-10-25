@@ -45,4 +45,4 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 
 Regenerate: `uv run python experiments/0001-splits/make_splits.py` (needs `results/0000-data-audit/cases.csv`; if it is missing, rerun the audit first). Check: `uv run python experiments/0001-splits/check_splits.py`. Reproduce check (spec 0002, AC-2), never overwrites the committed file: `uv run python experiments/0001-splits/make_splits.py --out <tmp>/splits.csv`, then `uv run python experiments/0001-splits/check_splits.py --compare <tmp>/splits.csv`.
 
-Reproduced under the locked environment: **not yet checked** (the human runs the reproduce check above). SHA256 of the committed `splits.csv`: to be recorded with that check.
+Reproduced under the locked environment on 2026-10-25 (human run, pandas 3.1.0 from `uv run`): `check_splits.py --compare` printed `OK ... 1251 cases, same fold per case`. SHA256 of the committed `data/splits/splits.csv`: `c804b7543cf0ebda587a6da753fd6445b7222f9218efdee36253e4c176b282dc`.

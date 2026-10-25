@@ -53,7 +53,7 @@ Full run 2026-10-25 (human, Quadro T2000 Max-Q), run `20261025-000309-f4bbd0b9`,
 ## G. Tracer review fixes (spec 0002)
 Fixes from the fresh model review (`docs/reviews/2026-10-25-feat-tracer-bullet.md`).
 - Environment: `pandas` 3.1.0 locked (ADR 0001). The audit and split scripts run with `uv run`.
-- Split reproduce check: `make_splits.py --out <tmp>/splits.csv`, then `check_splits.py --compare <tmp>/splits.csv`. AI pre-check 2026-10-25 under pandas 3.1.0: 1251 cases, same fold per case, committed file unchanged. The official record in `data/DATA.md` waits for the human's run.
+- Split reproduce check: `make_splits.py --out <tmp>/splits.csv`, then `check_splits.py --compare <tmp>/splits.csv`. Human run 2026-10-25 under pandas 3.1.0: 1251 cases, same fold per case, committed file unchanged; SHA256 recorded in `data/DATA.md`. `tracer.pdf` builds with 0 overfull warnings.
 - Lint: `uv run ruff check .` passes. `EXE002` is ignored because of the NTFS executable bit (ADR 0001).
 - Checkpoint rule: a fixed iteration budget, report the final weights (`last.pt`), no selection. `evaluate.py` exits 1 when the `last.pt` config hash differs from `run.json`. `check_tracer.py` still accepts old runs that hold `best_iteration` (`LEGACY_KEYS`); the full run `20261025-000309-f4bbd0b9` still prints PASS.
 - Fail loudly: `load_case()` raises `ValueError` on label values outside 0 to 3 or non integer values; `subject_of()` raises on anything that is not `BraTS-GLI-NNNNN-NNN` (`BRATS_ID_RE`, also used by `audit.py`); any crash in training writes status `failed` with the exception type, then re raises.
