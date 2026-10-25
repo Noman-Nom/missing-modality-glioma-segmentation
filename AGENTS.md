@@ -64,6 +64,7 @@ Specs live in `docs/specs/thesis/NNNN-title/` (`index.md` is the build spec, `ve
 - branch prefix: `feat/` (also `exp/`, `write/`, `fix/`, `docs/`, `chore/`)
 - commit: per milestone, Conventional Commits (see CONTRIBUTING.md)
 - The human pushes and opens pull requests. The AI prints the commands and a paste-ready PR summary and does not run them.
+- **No pull request for small changes.** Small means docs only, `/sync` reconciles, tracker or scope ticks, typo and wording fixes (no code in `experiments/`, no tests, no thesis chapter). Commit them straight on `main` and print only `git push`. Open a branch and PR only for a milestone: code, experiments, tests, specs or chapters.
 
 ## Tooling
 
