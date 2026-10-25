@@ -1,24 +1,29 @@
 # experiments/
 
 ## Overview
-Code for all experiments: data audit, splits, training, missing-modality evaluation. Nothing here yet (milestone 2 starts it).
+Code for all experiments: data audit, splits, training, missing-modality evaluation. Shared code is in `common/`; each experiment is an `NNNN-name/` folder.
 
 ## Stack
-Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy. 4 GB GPU: patch training, batch size 1, mixed precision. Versions are pinned in the lockfile once it exists.
+Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy. 4 GB GPU: patch training, batch size 1, mixed precision. Versions are pinned in `uv.lock` at the repo root (ADR 0001).
 
-## Key files (planned)
+## Key files
 - `common/data.py` loaders, per-dataset label and channel mapping
 - `common/missing.py` missing-modality patterns and how a missing channel is represented
 - `common/metrics.py` Dice, sensitivity, precision, HD95 (empty-region rules defined once)
 - `common/seed.py` one function that sets all seeds
-- `NNNN-name/config.yaml` one config per experiment
+- `common/model.py` the compact 3D U-Net and sliding window prediction
+- `common/runlog.py` config loading, config hash, git and version info, `run.json`
+- `NNNN-name/config.toml` one config per experiment
 
 ## Commands
-Not created yet. Each experiment will document: run, check, regenerate table.
+Run from the repo root. Each script's docstring holds its exact run line.
+- Tracer (0002): `uv run python experiments/0002-tracer-bullet/train.py [--quick]`, then `evaluate.py --run <dir>`, `make_table.py --run <dir>`, `check_tracer.py <dir>`.
+- Checks: `check_audit.py`, `check_splits.py`, `check_tracer.py` in each experiment folder.
+- Tests import `common` because `pyproject.toml` puts `experiments/` on the pytest path.
 
 ## Conventions
 - One config file per experiment; seeds set in one function.
-- Outputs go only to `results/<experiment>/`.
+- Outputs go only to `results/<experiment>/`. Generated LaTeX tables go to `writing/tables/`.
 - Each run prints the config hash and the git commit.
 - Notebooks may explore, but results come from scripts.
 - Missing-modality patterns are defined before running and evaluated on the same subjects for every method.
@@ -27,7 +32,16 @@ Not created yet. Each experiment will document: run, check, regenerate table.
 Experiments import from `common/`, never from each other.
 
 ## Naming
-`NNNN-short-name` (E0 to E7 map to the numbers), snake_case modules, region names exactly WT, TC, ET, modality names T1, T1ce, T2, FLAIR.
+`NNNN-short-name`, snake_case modules, region names exactly WT, TC, ET, modality names T1, T1ce, T2, FLAIR.
+
+Folder numbers are build order. E numbers (E0 to E7, defined in `context/project-overview.md`) are thesis labels. This table is the one mapping (spec 0002):
+
+| E number | Thesis label | Folder |
+|---|---|---|
+| E0 | Data inspection | `0000-data-audit` |
+| E1 to E7 | Baseline, missing modality evaluation, strategies, extensions | folder added here when built |
+| none | Infrastructure: subject level split | `0001-splits` |
+| none | Infrastructure: tracer bullet | `0002-tracer-bullet` |
 
 ## Gotchas
 - Label values and channel order must come from the audit, not memory. MSD and BraTS differ.

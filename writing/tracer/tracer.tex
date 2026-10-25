@@ -1,0 +1,18 @@
+% Tracer bullet stub (spec 0001, AC-12). Proves a script generated table builds in XeLaTeX.
+% Build: cd writing/tracer && latexmk -xelatex tracer.tex
+\documentclass[11pt]{article}
+\usepackage[landscape,margin=2cm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{booktabs}
+
+\begin{document}
+
+\section*{Tracer bullet}
+
+This page only shows that a table written by \texttt{make\_table.py} builds in the thesis
+toolchain. The numbers are not results and must not be quoted.
+
+\input{../tables/0002-tracer-bullet.tex}
+
+\end{document}

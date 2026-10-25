@@ -1,0 +1,38 @@
+# Tracer bullet (spec 0001). All fields required. --quick overrides n_train_subjects = 2,
+# n_val_subjects = 1, iterations = 10, val_every = 5 before the config is hashed.
+seed = 42
+
+[data]
+splits_csv = "data/splits/splits.csv"
+n_train_subjects = 16
+n_val_subjects = 4
+timepoint = 0
+exclude_flair_flag = true
+
+[preprocess]
+clip_low_pct = 0.5
+clip_high_pct = 99.5
+cache_rate = 1.0
+
+[train]
+iterations = 2000
+val_every = 500
+patch = [96, 96, 96]
+pos = 1
+neg = 1
+batch_size = 1
+num_workers = 2
+lr = 1e-3
+weight_decay = 1e-5
+amp = true
+
+[model]
+channels = [16, 32, 64, 128]
+strides = [2, 2, 2]
+num_res_units = 1
+
+[infer]
+roi = [96, 96, 96]
+sw_batch_size = 1
+overlap = 0.5
+threshold = 0.5

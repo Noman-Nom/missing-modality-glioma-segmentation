@@ -18,7 +18,10 @@ Tracer Bullet: one thin thread through every layer (data, model, evaluation, wri
 
     cd writing/proposal && latexmk -xelatex proposal.tex   # build the proposal PDF
     latexmk -C                                             # clean build files (same folder)
-    # Experiments, tests, lint: not created yet (milestone 2 adds them here)
+    uv run pytest -q                                       # fast tests (repo root; slow ones skipped)
+    uv run pytest -m slow -q                               # slow and GPU tests (the human runs these)
+    uv run ruff check .                                    # lint
+    # Per experiment run commands: see experiments/AGENTS.md
 
 ## Specs and decisions
 
@@ -64,13 +67,20 @@ Specs live in `docs/specs/thesis/NNNN-title/` (`index.md` is the build spec, `ve
 
 ## Tooling
 
-- **Installed**: git, latexmk. A pre-commit hook in `.githooks/` blocks secrets, MRI data and large files (enable with `git config core.hooksPath .githooks`; already set in this clone).
-- **Planned**: uv, ruff, pytest. CI in `.github/workflows/ci.yml` builds writing and runs lint and tests when they exist.
+- **Installed**: git, latexmk, uv, pytest, ruff (config in `pyproject.toml`). A pre-commit hook in `.githooks/` blocks secrets, MRI data and large files (enable with `git config core.hooksPath .githooks`; already set in this clone).
+- CI in `.github/workflows/ci.yml` builds writing and runs lint and tests when they exist.
 - Testing convention: pytest, fast tests in `tests/`, slow tests marked `slow` and run by the human.
 
 ## Agent skills
 
 Workflow skills live in `.claude/skills/` (nine: scope, audit, architect, develop, check, test, document, sync, debug). They are vendored from the thesis repo; do not hand edit them. See `.claude/README.md`.
+
+Tool skills (installed with `npx skills add`, tracked in `skills-lock.json`):
+- [pytorch-patterns](.claude/skills/pytorch-patterns/): `affaan-m/ecc`, PyTorch training loops, models, data loading, reproducibility
+- [python-testing-patterns](.claude/skills/python-testing-patterns/): `wshobson/agents`, pytest fixtures, mocking, test structure
+- [modern-python](.claude/skills/modern-python/): `trailofbits/skills`, uv and ruff project tooling
+- [scipy-best-practices](.claude/skills/scipy-best-practices/): `mindrally/skills`, SciPy numerics and statistics
+- MCP servers: none (no official server for PyTorch, MONAI, nibabel, scipy, pytest or ruff)
 
 ## Context files
 

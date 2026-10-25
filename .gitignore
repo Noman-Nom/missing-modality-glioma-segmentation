@@ -1,6 +1,9 @@
 # secrets
 .env
+.env.*
+!.env.example
 *.pem
+*.key
 
 # data (MRI never goes in git)
 data/raw/*
@@ -10,13 +13,30 @@ data/processed/*
 *.nii
 *.nii.gz
 *.dcm
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# raw BraTS downloads sitting in the repo root (never commit; see data/DATA.md)
+/ASNR-MICCAI-BraTS2023-*/
+/BraTS*/
+/Task01_BrainTumour*/
+*.synapse_download*
 
 # model weights and big outputs
 *.pt
 *.pth
 *.ckpt
+*.safetensors
+wandb/
+mlruns/
+runs/
 results/*
 !results/.gitkeep
+# generated tables, rebuilt from results/ by make_table.py
+writing/tables/
+writing/tracer/tracer.pdf
 
 # python
 __pycache__/
@@ -48,3 +68,6 @@ build.log
 # editor / OS
 .vscode/
 .DS_Store
+Thumbs.db
+.idea/
+*.swp

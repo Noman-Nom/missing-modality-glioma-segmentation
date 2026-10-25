@@ -2,6 +2,8 @@
 
 ## Chapter map
 - `proposal/proposal.tex` is the 7 page proposal (Option B two-tone journal style, burgundy #7A1F3D, all RQs). Build: `cd writing/proposal && latexmk -xelatex proposal.tex`.
+- `tracer/tracer.tex` is the tracer bullet stub; it only shows a generated table builds. Build: `cd writing/tracer && latexmk -xelatex tracer.tex`.
+- `tables/` holds LaTeX tables written by `experiments/*/make_table.py`. Never edit them by hand.
 - Thesis chapters are not created yet; university template unknown, ask. Each chapter will state which RQs it answers.
 - `refs.bib` is shared (19 entries, all UNVERIFIED). `figures/` holds generated figures only.
 
