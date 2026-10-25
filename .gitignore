@@ -34,6 +34,9 @@ mlruns/
 runs/
 results/*
 !results/.gitkeep
+# generated tables, rebuilt from results/ by make_table.py
+writing/tables/
+writing/tracer/tracer.pdf
 
 # python
 __pycache__/

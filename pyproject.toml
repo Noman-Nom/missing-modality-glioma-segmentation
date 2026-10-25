@@ -17,7 +17,12 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["experiments"]
 addopts = "-m 'not slow'"
 markers = [
     "slow: slow or GPU test; the human runs it with -m slow",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

@@ -1,7 +1,7 @@
 # 0001. Tracer bullet: one thin end to end run from BraTS files to a thesis table
 
 **Date**: 2026-10-25
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 
@@ -285,19 +285,19 @@ Test hook: when the env var `TRACER_INJECT_INF=1` is set, `train.py` replaces th
 
 Tracer Bullet order: first get a thin thread through every layer with `--quick`, then thicken each layer with its tests and checks. The AI may run fast tests and one `--quick` run (under about 2 minutes); the human runs the full 2,000 iteration run.
 
-1. Add `pythonpath = ["experiments"]` to pytest config and the `[tool.ruff]` block, create `experiments/common/__init__.py` and `seed.py` with `set_seed()`, satisfies **AC-10**
-2. `common/runlog.py`: `load_config()`, `config_hash()`, `git_info()`, `versions()`, `RunRecord` writing `run.json` with status transitions, satisfies **AC-9**
-3. `common/data.py`: modality and suffix map, `label_to_regions()`, `select_subjects()`, `case_paths()`, `check_inputs()`, satisfies **AC-1**, **AC-2**
-4. `common/data.py`: `normalise()`, `crop_box()` and the train and eval MONAI transform lists (load, cast, crop on raw, normalise, regions, `wt` key, pad, then the random pos neg patch as the only random step), satisfies **AC-3**
-5. `common/missing.py`: `PATTERNS` and `apply_pattern()`, satisfies **AC-4**
-6. `common/metrics.py`: `region_metrics()` with the empty region rule, using MONAI's HD95 only when both sides are non empty, satisfies **AC-8**
-7. `0002-tracer-bullet/config.toml` and `train.py` (CacheDataset, seeded DataLoader with endless cycling, model, loss, AMP, val every N, checkpoints, `--quick`, `--device`, config copy into the run folder), satisfies **AC-5**, **AC-6**, **AC-9**
-8. `evaluate.py` (sliding window, 15 patterns, `metrics.csv`), satisfies **AC-7**
-9. `make_table.py`, `writing/tracer/tracer.tex`, `.gitignore` line for `writing/tables/`, satisfies **AC-12**
-10. Thread check: AI runs `train.py --quick`, `evaluate.py`, `make_table.py` and the LaTeX build once end to end; fix whatever breaks, satisfies **AC-7**, **AC-12**
-11. Thicken failures: OOM, non finite loss, Ctrl+C, missing files, atomic checkpoint save, with fast tests in `tests/test_tracer_failures.py` (forced non finite loss, missing file), satisfies **AC-11**
-12. `check_tracer.py`, satisfies **AC-13**
-13. Fast tests in `tests/test_common_data.py`, `test_common_missing.py`, `test_common_metrics.py`, `test_common_seed.py`, plus a `slow` test that runs one real case through the eval transforms and checks shapes, satisfies **AC-1**, **AC-2**, **AC-3**, **AC-4**, **AC-8**, **AC-10**, **AC-14**
+1. [x] Add `pythonpath = ["experiments"]` to pytest config and the `[tool.ruff]` block, create `experiments/common/__init__.py` and `seed.py` with `set_seed()`, satisfies **AC-10**
+2. [x] `common/runlog.py`: `load_config()`, `config_hash()`, `git_info()`, `versions()`, `RunRecord` writing `run.json` with status transitions, satisfies **AC-9**
+3. [x] `common/data.py`: modality and suffix map, `label_to_regions()`, `select_subjects()`, `case_paths()`, `check_inputs()`, satisfies **AC-1**, **AC-2**
+4. [x] `common/data.py`: `normalise()`, `crop_box()` and the train and eval MONAI transform lists (load, cast, crop on raw, normalise, regions, `wt` key, pad, then the random pos neg patch as the only random step), satisfies **AC-3**
+5. [x] `common/missing.py`: `PATTERNS` and `apply_pattern()`, satisfies **AC-4**
+6. [x] `common/metrics.py`: `region_metrics()` with the empty region rule, using MONAI's HD95 only when both sides are non empty, satisfies **AC-8**
+7. [x] `0002-tracer-bullet/config.toml` and `train.py` (CacheDataset, seeded DataLoader with endless cycling, model, loss, AMP, val every N, checkpoints, `--quick`, `--device`, config copy into the run folder), satisfies **AC-5**, **AC-6**, **AC-9**
+8. [x] `evaluate.py` (sliding window, 15 patterns, `metrics.csv`), satisfies **AC-7**
+9. [x] `make_table.py`, `writing/tracer/tracer.tex`, `.gitignore` line for `writing/tables/`, satisfies **AC-12**
+10. [x] Thread check: AI runs `train.py --quick`, `evaluate.py`, `make_table.py` and the LaTeX build once end to end; fix whatever breaks, satisfies **AC-7**, **AC-12**
+11. [x] Thicken failures: OOM, non finite loss, Ctrl+C, missing files, atomic checkpoint save, with fast tests in `tests/test_tracer_failures.py` (forced non finite loss, missing file), satisfies **AC-11**
+12. [x] `check_tracer.py`, satisfies **AC-13**
+13. [x] Fast tests in `tests/test_common_data.py`, `test_common_missing.py`, `test_common_metrics.py`, `test_common_seed.py`, plus a `slow` test that runs one real case through the eval transforms and checks shapes, satisfies **AC-1**, **AC-2**, **AC-3**, **AC-4**, **AC-8**, **AC-10**, **AC-14**
 14. Human runs the full chain (commands in [verify.md](verify.md)) and pastes the last two lines of each; record the run id, peak VRAM, wall time and pattern 1 WT Dice in `docs/whats-built.md` and `context/progress-tracker.md`, satisfies **AC-5**, **AC-6**, **AC-14**
 
 ## Consequences
