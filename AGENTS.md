@@ -4,8 +4,8 @@ Master's thesis (NUST MISIS, Data Science 09.04.01; supervisor Kalitin Denis Vla
 
 ## Stack
 
-- **Language / runtime**: Python 3 with PyTorch and MONAI (versions pinned when the environment is created in milestone 2)
-- **Environment**: uv with a committed lockfile (planned; not created yet)
+- **Language / runtime**: Python 3.12 with PyTorch (cu130) and MONAI, versions pinned in `uv.lock` (ADR 0001)
+- **Environment**: uv with a committed `uv.lock`. The venv lives off the NTFS drive: set `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/qarar-research` and `UV_LINK_MODE=copy` before any `uv` command (ADR 0001)
 - **Writing**: LaTeX, XeLaTeX with Times New Roman, biblatex + biber, British spelling (university template unknown, ask); citations in `writing/refs.bib`
 - **Web demo**: not planned. If added, it gets its own nested AGENTS.md in `app/`.
 - **Hardware**: Dell Precision 5550, Quadro T2000 Max-Q, 4 GB VRAM, Linux. Everything must fit this unless an ADR says otherwise.
