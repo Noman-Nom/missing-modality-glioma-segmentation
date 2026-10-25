@@ -2,6 +2,7 @@
 
 **Date**: 2026-10-25
 **Status**: Accepted
+**Amended by**: [0002](../0002-tracer-review-fixes/index.md) (only `last.pt` is saved, no `best_iteration` key; table empty count split in two; run id collision suffix; strict labels and IDs)
 
 ## Summary
 
