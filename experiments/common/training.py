@@ -1,9 +1,12 @@
 """The shared training loop, validation, checkpoints and run record (spec 0003, AC-10, AC-17).
 
 E1 trains through train() with the identity batch_hook; E3 and E4 reuse it unchanged through
-batch_hook and val_patterns. Build plan 1 (thin thread): constant lr, no augmentation, no resume.
+batch_hook and val_patterns. Build plans 1 and 2: warmup and cosine lr, val with patterns into
+val_log.csv, selection and the fixed write order. No resume yet.
 """
 import csv
+import io
+import math
 import os
 import statistics
 import time
@@ -34,6 +37,7 @@ RUN_KEYS = (
 )
 LOG_COLUMNS = ["iteration", "loss", "dice_loss", "bce_loss", "lr", "seconds",
                "val_wt", "val_tc", "val_et", "val_score"]
+VAL_COLUMNS = ["iteration", "pattern_id", "case", "region", "dice", "gt_empty", "pred_empty"]
 BATCH_KEYS = ("case", "image", "label", "wt")
 SELECTION_PATTERN = 1  # complete input
 
@@ -45,6 +49,21 @@ class NonFiniteLoss(RuntimeError):
 def identity(batch, rng):
     """The E1 batch hook: changes nothing and draws nothing."""
     return batch
+
+
+def check_config(cfg):
+    """Problems that must stop a run before it starts (exit 2), as strings; empty = fine."""
+    t = cfg["train"]
+    if t["iterations"] % t["val_every"]:
+        return [f"iterations {t['iterations']} is not a multiple of val_every {t['val_every']}"]
+    return []
+
+
+def lr_factor(i, warmup, iterations):
+    """lr multiplier at iteration i (from 1): linear warmup to 1, then cosine to 0 at the end."""
+    if i <= warmup:
+        return i / warmup
+    return 0.5 * (1 + math.cos(math.pi * (i - warmup) / (iterations - warmup)))
 
 
 def make_run_dir(out, stamp):
@@ -124,6 +143,20 @@ def save_checkpoint(path, **state):
     os.replace(tmp, path)
 
 
+def append_val_log(path, iteration, rows):
+    """Old rows plus this val point's rows, written to a temp file and renamed in."""
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, VAL_COLUMNS)
+    if path.exists():
+        buf.write(path.read_text())
+    else:
+        w.writeheader()
+    w.writerows({"iteration": iteration, **r} for r in rows)
+    tmp = path.with_suffix(".csv.tmp")
+    tmp.write_text(buf.getvalue())
+    os.replace(tmp, path)
+
+
 def _loop(cfg, rec, run_dir, device, gen, batch_hook, val_patterns, losses, step_seconds):
     t = cfg["train"]
     cfg_hash, val_cases = rec.data["config_hash"], rec.data["val_cases"]
@@ -137,6 +170,10 @@ def _loop(cfg, rec, run_dir, device, gen, batch_hook, val_patterns, losses, step
     opt = torch.optim.AdamW(model.parameters(), lr=t["lr"], weight_decay=t["weight_decay"])
     amp = t["amp"] and device.type == "cuda"
     scaler = torch.amp.GradScaler(device.type, enabled=amp)
+    # stepped once per iteration, so the lr in the optimiser is the one applied at step i (AC-7);
+    # clamped because the step after the last one asks for iteration iterations + 1
+    sched = torch.optim.lr_scheduler.LambdaLR(
+        opt, lambda s: lr_factor(min(s + 1, t["iterations"]), t["warmup"], t["iterations"]))
     # its own stream, so a hook that draws never changes which patches a seed gives (AC-17)
     hook_rng = np.random.default_rng(cfg["seed"] + 1)
     inject = os.environ.get("BASELINE_INJECT_INF")
@@ -170,20 +207,24 @@ def _loop(cfg, rec, run_dir, device, gen, batch_hook, val_patterns, losses, step
             scaler.update()
             if amp and scaler.get_scale() < scale:
                 skipped += 1  # inf gradients, step skipped by GradScaler; normal, not a failure
+            lr = opt.param_groups[0]["lr"]
+            sched.step()
             losses.append(loss.item())
             step_seconds.append(time.time() - t0)
-            row = [it, losses[-1], ld.item(), lb.item(), opt.param_groups[0]["lr"],
-                   round(step_seconds[-1], 4)]
+            row = [it, losses[-1], ld.item(), lb.item(), lr, round(step_seconds[-1], 4)]
             rec.update(iterations=it, scaler_skipped_steps=skipped)
             if it % t["val_every"] == 0:
                 v0 = time.time()
-                per, score = selection_score(validate(model, val_cases, val_patterns, cfg, device))
+                rows = validate(model, val_cases, val_patterns, cfg, device)
+                per, score = selection_score(rows)
                 row += [per["WT"], per["TC"], per["ET"], score]
                 rec.data["val_history"].append({"iteration": it, "wt": per["WT"], "tc": per["TC"],
                                                 "et": per["ET"], "score": score,
                                                 "seconds": round(time.time() - v0, 1)})
                 state = {"model": model.state_dict(), "iteration": it, "config_hash": cfg_hash,
                          "score": score}
+                # fixed write order (AC-8): val_log.csv, best.pt if improved, last.pt, run.json
+                append_val_log(run_dir / "val_log.csv", it, rows)
                 if rec.data["best_score"] is None or score > rec.data["best_score"]:
                     save_checkpoint(ckpt / "best.pt", **state)  # a tie keeps the earlier one
                     rec.update(best_iteration=it, best_score=score)
@@ -213,8 +254,8 @@ def train(cfg, run_dir, run_id, train_cases, val_cases, *, device, quick=False,
     """Train one run into run_dir and keep its run.json current. Returns the exit code:
     0 ok, 1 failed (OOM, non finite loss), 130 Ctrl+C. Any other error writes status failed,
     then raises."""
-    errors = check_cache(cfg, train_cases + val_cases)
-    assert not errors, f"cache guard failed: {errors[:3]}"  # scripts check first and exit 2
+    errors = check_config(cfg) + check_cache(cfg, train_cases + val_cases)
+    assert not errors, f"config or cache guard failed: {errors[:3]}"  # scripts exit 2 first
     run_dir = Path(run_dir)
     gen = set_seed(cfg["seed"])
     cfg_hash = config_hash(cfg)
@@ -240,6 +281,8 @@ def train(cfg, run_dir, run_id, train_cases, val_cases, *, device, quick=False,
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
+            # expected when GradScaler skips the first step; not a nondeterminism warning
+            warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step")
             _loop(cfg, rec, run_dir, device, gen, batch_hook, val_patterns, losses, step_seconds)
         rec.update(status="ok")
     except torch.cuda.OutOfMemoryError as e:

@@ -110,7 +110,7 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
 - [x] Design it (spec): /architect compact 3D U-Net baseline
 - [ ] Build it: /develop E1 complete-input baseline
   - [x] Thin thread: `fold_cases()`, float16 cache and `preprocess.py`, minimal shared loop, `train.py`, `evaluate.py`, `make_table.py`, quick run on synthetic cases (AC-1, AC-2, AC-3, AC-4, AC-10, AC-13, AC-14, AC-17)
-  - [ ] Thicken: warmup and cosine lr, val with patterns and selection, write order, augmentation (AC-5, AC-7, AC-8)
+  - [x] Thicken: warmup and cosine lr, val with patterns and selection, write order, augmentation (AC-5, AC-7, AC-8)
   - [ ] Robustness and checks: full state resume, failures, `--verify`, `memory_test.py`, `check_baseline.py`, determinism tests, docs (AC-6, AC-9, AC-11, AC-12, AC-15, AC-16, AC-18)
   - [ ] Human runs: preprocess, verify, memory test, full training, evaluate, table, check (AC-2, AC-6, AC-7, AC-8, AC-9, AC-13, AC-16)
 - [ ] Verify it: /check verify E1 complete-input baseline

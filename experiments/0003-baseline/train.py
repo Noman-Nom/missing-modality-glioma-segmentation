@@ -5,8 +5,9 @@ Run from the repo root, after preprocess.py:
     uv run python experiments/0003-baseline/train.py --seed 43    # another seed, its own hash
     uv run python experiments/0003-baseline/train.py --quick      # fast gate
 Writes results/0003-baseline/<run_id>/ with config.toml, run.json, train_log.csv and
-checkpoints/best.pt (best val score) and last.pt (latest val point). Never reads the test fold.
-Exit 0 ok, 1 failed (OOM, non finite loss), 2 bad inputs or cache guard (before training),
+val_log.csv (Dice per val point, pattern, case and region), checkpoints/best.pt (best val score)
+and last.pt (latest val point). Never reads the test fold.
+Exit 0 ok, 1 failed (OOM, non finite loss), 2 bad config, inputs or cache guard (before training),
 130 Ctrl+C. Test hook: BASELINE_INJECT_INF=<iteration> feeds inf at that iteration.
 """
 import argparse
@@ -21,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.cache import check_cache, repo_path
 from common.data import fold_cases
 from common.runlog import config_hash, load_config
-from common.training import make_run_dir, train
+from common.training import check_config, make_run_dir, train
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -69,6 +70,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     cfg = effective_config(a.config, a.quick, a.seed)
+    bad = check_config(cfg)
+    if bad:
+        print("ERROR: bad config, nothing trained:\n" + "\n".join("  " + e for e in bad))
+        return 2
     train_cases, val_cases = run_cases(cfg, a.quick)
     errors = check_cache(cfg, train_cases + val_cases)
     if errors:

@@ -20,7 +20,7 @@ from common.cache import (
 )
 from common.data import case_paths, crop_box, fold_cases, load_case
 from common.runlog import config_hash, dump_config, load_config
-from conftest import write_case
+from conftest import only_run, write_case
 
 REPO = Path(__file__).resolve().parents[1]
 EXP = REPO / "experiments" / "0003-baseline"
@@ -42,34 +42,6 @@ preprocess, train, evaluate, make_table = (load(n) for n in
 def restore_determinism():
     yield
     torch.use_deterministic_algorithms(False)
-
-
-@pytest.fixture
-def setup(tmp_path, synthetic_cases):
-    """A tiny CPU config over the synthetic cases, its own cache dir; returns a small namespace."""
-    data, splits, train_cases, val_cases = synthetic_cases
-    cfg = load_config(EXP / "config.toml")
-    cfg["data"].update(splits_csv=str(splits), cache_dir=str(tmp_path / "cache"))
-    cfg["train"].update(iterations=2, val_every=2, patch=[32, 32, 32], num_workers=0)
-    cfg["model"].update(channels=[4, 8], strides=[2], num_res_units=1)
-    cfg["infer"]["roi"] = [32, 32, 32]
-    path = tmp_path / "config.toml"
-    dump_config(cfg, path)
-
-    class S:
-        pass
-
-    s = S()
-    s.cfg, s.config, s.data, s.splits = cfg, path, data, splits
-    s.train, s.val, s.cache, s.out = train_cases, val_cases, tmp_path / "cache", tmp_path / "results"
-    s.pre_argv = ["--config", str(path), "--data-dir", str(data)]
-    s.train_argv = ["--config", str(path), "--out", str(s.out), "--device", "cpu"]
-    return s
-
-
-def only_run(out):
-    (run,) = out.iterdir()
-    return run
 
 
 # covers: AC-1
