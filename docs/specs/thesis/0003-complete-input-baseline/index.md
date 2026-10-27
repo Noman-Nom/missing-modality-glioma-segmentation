@@ -1,7 +1,7 @@
 # 0003. Complete input baseline (E1): a wider 3D U-Net trained on the full train fold, chosen on val
 
 **Date**: 2026-10-27
-**Status**: Proposed
+**Status**: In Progress
 
 ## Summary
 

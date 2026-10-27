@@ -13,8 +13,11 @@ from monai.metrics import compute_hausdorff_distance
 HD95_EMPTY_MM = 373.13
 
 
-def region_metrics(pred, gt, spacing):
-    """Binary pred and gt (X, Y, Z), voxel spacing in mm. Returns a dict of the metrics."""
+def region_metrics(pred, gt, spacing, with_hd95=True):
+    """Binary pred and gt (X, Y, Z), voxel spacing in mm. Returns a dict of the metrics.
+
+    with_hd95=False skips the distance (slow) and gives hd95_mm NaN; validation needs Dice only.
+    """
     pred, gt = np.asarray(pred).astype(bool), np.asarray(gt).astype(bool)
     n_pred, n_gt = int(pred.sum()), int(gt.sum())
     tp = int((pred & gt).sum())
@@ -25,7 +28,7 @@ def region_metrics(pred, gt, spacing):
         dice, hd95 = 0.0, HD95_EMPTY_MM
     else:
         dice = 2 * tp / (n_pred + n_gt)
-        hd95 = float(compute_hausdorff_distance(
+        hd95 = math.nan if not with_hd95 else float(compute_hausdorff_distance(
             torch.from_numpy(pred)[None, None], torch.from_numpy(gt)[None, None],
             include_background=True, percentile=95, directed=False,
             spacing=[float(s) for s in spacing]).item())

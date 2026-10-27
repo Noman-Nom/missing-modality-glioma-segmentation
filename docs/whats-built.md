@@ -61,3 +61,10 @@ Fixes from the fresh model review (`docs/reviews/2026-10-25-feat-tracer-bullet.m
 - Table: per region Dice mean and median, HD95 mean and median, Both empty (Dice 1), One empty (Dice 0); headers on two rows so the table fits the landscape page.
 - No script under `experiments/` runs code on import (`check_splits.py`, `check_audit.py`, `summarize.py` now have `main()`).
 - Fast tests: `uv run pytest -q` gives 84 passed, 2 slow deselected (2026-10-25).
+
+## H. E1 complete input baseline (spec 0003), in progress
+Milestone 1 of 4 built (thin thread, build plan item 1, 2026-10-27, branch `feat/e1-baseline`). Nothing has run on real data yet.
+- Shared code in `experiments/common/`: `data.py` adds `fold_cases()` (sorted case IDs of one fold, timepoint and FLAIR flag filters) and `CachedCase` with `cached_train_transforms()` and `cached_eval_transforms()`. `cache.py` is new: `PREPROCESS_VERSION = 1`, `preprocess_hash()`, `preprocess_case()`, `write_case()` (float16 `.npz` through a temp file), `manifest.csv` and `cache.json` writers, and `check_cache()` (the hash, missing case and test fold guard). `training.py` is new: `train()` with `batch_hook(batch, rng)` (its own generator, seed + 1), `validate(model, val_cases, patterns, ...)` (Dice only), the selection score, `best.pt` (strict improvement) and `last.pt`, and the E1 `run.json` key list. `metrics.region_metrics()` takes `with_hd95=False` so val skips HD95. `runlog.RunRecord` takes optional `keys` and `defaults` (tracer behaviour unchanged).
+- Scripts in `experiments/0003-baseline/`: `config.toml`, `preprocess.py [--folds] [--quick]`, `train.py [--quick] [--seed N] [--device cpu]`, `evaluate.py --run <dir>` (`metrics_val.csv`, pattern 1 only), `make_table.py --run <dir>` (`writing/tables/0003-baseline-val.tex`).
+- Not built yet: warmup and cosine lr (lr is constant), `val_log.csv` and the fixed write order, augmentation, resume, `--verify`, the disk space check, `memory_test.py`, `check_baseline.py`.
+- Fast tests: `uv run pytest -q` gives 119 passed, 2 slow deselected (2026-10-27); `tests/test_baseline_thread.py` adds 12, including a CPU thread test on synthetic cases.

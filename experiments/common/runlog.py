@@ -85,16 +85,20 @@ def versions():
 class RunRecord:
     """run.json: written as `running` at start, rewritten at exit."""
 
-    def __init__(self, run_dir, **fields):
+    def __init__(self, run_dir, keys=RUN_KEYS, defaults=None, **fields):
+        """keys and defaults default to the tracer's; another experiment passes its own."""
         self.path = Path(run_dir) / "run.json"
-        self.data = dict.fromkeys(RUN_KEYS)
-        self.data.update(status="running", nondeterminism_warnings=[], val_wt_dice=[],
-                         scaler_skipped_steps=0, iterations=0)
+        self.keys = keys
+        self.data = dict.fromkeys(keys)
+        if defaults is None:
+            defaults = {"nondeterminism_warnings": [], "val_wt_dice": [],
+                        "scaler_skipped_steps": 0, "iterations": 0}
+        self.data.update(status="running", **defaults)
         self.update(**fields)
         self.write()
 
     def update(self, **fields):
-        unknown = set(fields) - set(RUN_KEYS)
+        unknown = set(fields) - set(self.keys)
         assert not unknown, f"unknown run.json keys: {unknown}"
         assert fields.get("status", "running") in STATUSES
         self.data.update(fields)

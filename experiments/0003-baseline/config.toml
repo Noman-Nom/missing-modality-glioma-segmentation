@@ -1,0 +1,46 @@
+# E1 complete input baseline (spec 0003). All fields required. --quick overrides, before hashing:
+# the first 2 train and first 1 val case, iterations = 10, val_every = 5, warmup = 2,
+# patch = roi = [64, 64, 64], num_workers = 0. --seed N overrides seed before hashing.
+seed = 42
+
+[data]
+splits_csv = "data/splits/splits.csv"
+cache_dir = "data/processed/0003-baseline"
+train_timepoints = [0, 1]
+val_timepoints = [0]
+exclude_flair_flag = true
+
+[preprocess]
+clip_low_pct = 0.5
+clip_high_pct = 99.5
+
+[train]
+iterations = 40000
+val_every = 4000
+warmup = 500
+patch = [128, 128, 128]
+pos = 1
+neg = 1
+batch_size = 1
+num_workers = 4
+lr = 1e-3
+weight_decay = 1e-5
+amp = true
+flip_p = 0.5
+intensity_scale = 0.1
+intensity_shift = 0.1
+
+[model]
+channels = [32, 64, 128, 256, 320]
+strides = [2, 2, 2, 2]
+num_res_units = 2
+
+[infer]
+roi = [128, 128, 128]
+sw_batch_size = 1
+overlap = 0.5
+threshold = 0.5
+
+[memory_test]
+steps = 200
+limit_mib = 3584

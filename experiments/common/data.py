@@ -53,6 +53,15 @@ def select_subjects(splits_csv, n_train, n_val, timepoint=0, exclude_flair_flag=
     return train, val
 
 
+def fold_cases(splits_csv, fold, timepoints=None, exclude_flair_flag=False):
+    """Sorted case IDs of one fold of splits.csv (spec 0003, AC-1). timepoints None = all."""
+    with open(splits_csv, newline="") as f:
+        rows = list(csv.DictReader(f))
+    return sorted(r["case"] for r in rows if r["fold"] == fold
+                  and (timepoints is None or int(r["timepoint"]) in timepoints)
+                  and not (exclude_flair_flag and r["flair_mask_flag"] == "True"))
+
+
 def subject_of(case):
     """BraTS-GLI-00002-000 -> 00002. Any other string raises ValueError."""
     m = BRATS_ID_RE.match(case)
@@ -161,6 +170,41 @@ class Preprocess(Transform):
 
 def items(data_dir, cases):
     return [{"case": c, "paths": case_paths(data_dir, c)} for c in cases]
+
+
+class CachedCase(Transform):
+    """{'case', 'npz'} -> the keys of Preprocess, read from the spec 0003 float16 cache."""
+
+    def __call__(self, d):
+        with np.load(d["npz"]) as z:
+            image, label, spacing = z["image"], z["label"], z["spacing"]
+        return {
+            "case": d["case"],
+            "image": image.astype(np.float32),
+            "label": label_to_regions(label).astype(np.float32),
+            "wt": (label > 0)[None].astype(np.uint8),
+            "pixdim": spacing.astype(np.float32),
+        }
+
+
+def cached_items(cache_dir, cases):
+    return [{"case": c, "npz": str(Path(cache_dir) / f"{c}.npz")} for c in cases]
+
+
+def cached_eval_transforms(cfg):
+    return Compose([CachedCase()])
+
+
+def cached_train_transforms(cfg):
+    t = cfg["train"]
+    keys = ["image", "label", "wt"]
+    return Compose([
+        CachedCase(),
+        SpatialPadd(keys=keys, spatial_size=t["patch"], value=0),
+        RandCropByPosNegLabeld(keys=keys, label_key="wt", spatial_size=t["patch"],
+                               pos=t["pos"], neg=t["neg"], num_samples=1,
+                               image_key="image", image_threshold=0),
+    ])
 
 
 def eval_transforms(cfg):
