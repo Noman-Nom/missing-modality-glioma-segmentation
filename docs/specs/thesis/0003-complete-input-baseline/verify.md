@@ -66,3 +66,26 @@ Run in this order and paste the last two lines of each:
 | `check_baseline.py` | `PASS` | AC-9, AC-16 |
 
 If the run crashes, `train.py --resume <run dir>` continues it, and `check_baseline.py` still has to print `PASS` afterwards (AC-11).
+
+## Milestone 3 steps as built · updated 2026-10-31
+_Added by /develop after milestone 3. The fast table above names a planned `tests/test_baseline.py`; the tests were built under these names instead. `/check verify` runs these; `/test` locks the durable ones._
+
+### Commands (fast, no GPU, no real data)
+- [ ] `uv run pytest -q tests/test_baseline_robust.py::test_non_finite_loss_fails_then_resume_finishes` → `BASELINE_INJECT_INF=7` gives exit 1, `failed`, `failed_iteration` 7, `last.pt` at 5 with every AC-11 key; then `--resume` gives `ok`, log rows 1 to 10, val points 5 and 10, one `resumes` entry → AC-11, AC-12
+- [ ] `...::test_resumed_lr_continues_the_schedule` → the lr column of a failed and resumed run equals an unbroken run's → AC-7, AC-11
+- [ ] `...::test_ctrl_c_is_interrupted_and_resumable` → exit 130, `interrupted`, then a resume finishes `ok` → AC-12
+- [ ] `...::test_out_of_memory_fails_with_the_iteration` → exit 1, reason starts `CUDA out of memory`, `failed_iteration` 6 → AC-12
+- [ ] `...::test_best_pt_written_after_last_pt_is_deleted` → `best.pt` at 10 and `last.pt` at 5: `best.pt` deleted, best score and iteration from `last.pt` → AC-11
+- [ ] `...::test_resume_refusals`, `::test_resume_refused_without_last_pt` → exit 2 for status `ok`, a live pid, an edited `config.toml`, another cache hash, extra flags, no `last.pt`; a dead pid may resume → AC-11
+- [ ] `...::test_verify_passes_then_catches_a_changed_file`, `::test_verify_catches_an_image_that_does_not_match_a_recompute`, `::test_verify_needs_a_cache`, `::test_not_enough_free_disk_writes_nothing` → `--verify` exits 0, then 1 on a changed byte or a wrong image with a matching sha256, 2 with no cache; low disk gives exit 2 and no `.npz` → AC-2
+- [ ] `uv run pytest -q tests/test_baseline_checks.py -k memory_test or largest or projected` → `memory_test.json` has exactly the spec keys, a CPU run never passes, largest cases tie by ID, the projection formula → AC-6 (wiring only)
+- [ ] `uv run pytest -q tests/test_baseline_checks.py -k check` → PASS when every scaled threshold is met; `FAIL` reasons for crashed, quick, peak, AC-9 score, AC-9 loss, best iteration, cache hash, test fold leak, missing metrics → AC-9, AC-16
+- [ ] `uv run pytest -q tests/test_baseline_checks.py -k "same_seed or seed_43"` → two quick configs with the same seed match within 1e-6 (0 and 2 workers); seed 43 recorded with its own hash → AC-15
+
+### Value sourcing
+- [ ] Resume loader seed: resume a run and confirm `train()` calls `gen.manual_seed(seed * 100003 + iteration)` before the loader is built (the lr test above would still pass with a wrong seed, so read `common/training.py` `train()`) → AC-11
+- [ ] `projected_hours`: compare `memory_test.json` with `(s/iter * 40000 + val_seconds * 114 * 10) / 3600` by hand after the human run → AC-6
+- [ ] `peak_vram_reserved_mib` after a resume is the maximum of both segments (a resume on a smaller run must not lower it) → AC-10
+
+### Acceptance criteria coverage
+- AC-2 verify and disk · AC-6 wiring (the GPU number is the human step) · AC-9, AC-16 check script · AC-11 resume · AC-12 failures · AC-15 determinism. AC-18 is the E1 row in `experiments/AGENTS.md` plus the two docs.
