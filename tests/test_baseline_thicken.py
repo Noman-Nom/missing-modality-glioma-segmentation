@@ -99,7 +99,7 @@ def test_a_tied_score_keeps_the_earlier_checkpoint(setup, monkeypatch):
     rec = json.loads((run / "run.json").read_text())
     assert rec["best_iteration"] == 2 and rec["best_score"] == 0.5
     assert torch.load(run / "checkpoints" / "best.pt")["iteration"] == 2
-    assert torch.load(run / "checkpoints" / "last.pt")["iteration"] == 4
+    assert torch.load(run / "checkpoints" / "last.pt", weights_only=False)["iteration"] == 4
 
 
 def augment_cfg(flip_p):

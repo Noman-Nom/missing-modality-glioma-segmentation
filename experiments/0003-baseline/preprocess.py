@@ -3,16 +3,24 @@
 Run from the repo root:
     uv run python experiments/0003-baseline/preprocess.py            # train and val folds (human)
     uv run python experiments/0003-baseline/preprocess.py --quick    # only the quick run cases
+    uv run python experiments/0003-baseline/preprocess.py --verify   # check only, writes nothing
 Writes <cache_dir>/<case>.npz, manifest.csv and cache.json. Caches every case of the requested
 folds (no timepoint or flag filter); test only with --folds test. Cases already in the manifest
 with the same preprocess hash and their file present are skipped, so a rerun only adds missing
-cases. Exit 2: no data dir, a missing input file, or the cache dir holds a different hash.
+cases. Before writing it checks free disk space (CASE_MB per case still to write, estimated).
+--verify rechecks the sha256 of every manifest file and recomputes the first 3 sorted train
+cases in float32 (image within rtol and atol 1e-3, label exact).
+Exit 2: no data dir, a missing input file, the cache dir holds a different hash (or, with
+--verify, no cache), not enough free disk. Exit 1: a --verify mismatch.
 """
 import argparse
 import os
+import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.cache import (
@@ -32,6 +40,9 @@ from common.runlog import git_info, load_config
 
 HERE = Path(__file__).resolve().parent
 FOLDS = ("train", "val", "test")
+CASE_MB = 35  # estimated disk size of one cached case (AC-2)
+VERIFY_CASES = 3
+TOL = {"rtol": 1e-3, "atol": 1e-3}
 
 
 def quick_cases(cfg, splits):
@@ -41,6 +52,42 @@ def quick_cases(cfg, splits):
             + fold_cases(splits, "val", d["val_timepoints"], d["exclude_flair_flag"])[:1])
 
 
+def free_bytes(path):
+    """Free space on the drive that holds path (or its nearest existing parent)."""
+    p = Path(path).resolve()
+    while not p.exists():
+        p = p.parent
+    return shutil.disk_usage(p).free
+
+
+def verify(cfg, cdir, data_dir):
+    """Problems found by --verify, as strings; empty = the cache is intact."""
+    manifest = read_manifest(cdir)
+    bad = []
+    for c, row in sorted(manifest.items()):
+        f = cdir / f"{c}.npz"
+        if not f.is_file():
+            bad.append(f"{c}: file missing")
+        elif sha256_file(f) != row["sha256"]:
+            bad.append(f"{c}: sha256 differs from manifest.csv")
+    p = cfg["preprocess"]
+    train = sorted(c for c, r in manifest.items() if r["fold"] == "train")[:VERIFY_CASES]
+    bad += check_inputs(data_dir, train)
+    if bad:
+        return bad
+    for c in train:
+        image, label, *_ = preprocess_case(case_paths(data_dir, c), p["clip_low_pct"],
+                                           p["clip_high_pct"], c)
+        with np.load(cdir / f"{c}.npz") as z:
+            if z["image"].shape != image.shape or not np.allclose(
+                    z["image"].astype(np.float32), image, **TOL):
+                bad.append(f"{c}: cached image differs from a float32 recompute")
+            if not np.array_equal(z["label"], label):
+                bad.append(f"{c}: cached label differs from the cropped raw label")
+        print(f"recomputed {c}")
+    return bad
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--config", default=HERE / "config.toml")
@@ -48,6 +95,7 @@ def main(argv=None):
     ap.add_argument("--splits", default=None, help="default: [data] splits_csv of the config")
     ap.add_argument("--folds", default="train,val", help="comma separated, of train, val, test")
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument("--verify", action="store_true", help="check the cache, write nothing")
     a = ap.parse_args(argv)
 
     cfg = load_config(a.config)
@@ -66,6 +114,15 @@ def main(argv=None):
         print(f"ERROR: {cdir} holds a cache with preprocess hash {info['preprocess_hash'][:12]}, "
               f"this config needs {want[:12]}. Nothing deleted; use another cache_dir.")
         return 2
+    if a.verify:
+        if info is None:
+            print(f"ERROR: no cache.json in {cdir}; nothing to verify")
+            return 2
+        bad = verify(cfg, cdir, a.data_dir)
+        print("\n".join("  " + b for b in bad[:20]))
+        print(f"verify {'FAILED' if bad else 'ok'}: {len(read_manifest(cdir))} files, "
+              f"{len(bad)} problem(s)")
+        return 1 if bad else 0
 
     fold_of = {c: f for f in FOLDS for c in fold_cases(splits, f)}
     cases = quick_cases(cfg, splits) if a.quick else sorted(fold_of)
@@ -76,8 +133,15 @@ def main(argv=None):
         print("\n".join("  " + m for m in missing))
         return 2
 
-    cdir.mkdir(parents=True, exist_ok=True)
     manifest = read_manifest(cdir)
+    todo = [c for c in cases if not (manifest.get(c, {}).get("preprocess_hash") == want
+                                     and (cdir / f"{c}.npz").is_file())]
+    need, free = len(todo) * CASE_MB * 10**6, free_bytes(cdir)
+    if need > free:
+        print(f"ERROR: {len(todo)} case(s) to write need about {need / 1e9:.1f} GB, only "
+              f"{free / 1e9:.1f} GB free near {cdir}; nothing cached")
+        return 2
+    cdir.mkdir(parents=True, exist_ok=True)
     commit, _ = git_info()
     now = datetime.now(UTC).isoformat(timespec="seconds")
     info = info or {"preprocess_hash": want, "preprocess_version": PREPROCESS_VERSION,
