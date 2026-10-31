@@ -11,7 +11,7 @@ from common.runlog import config_hash, dump_config
 from conftest import only_run
 from test_baseline_thread import evaluate, load, preprocess, train
 
-memory_test, check = load("memory_test"), load("check_baseline")
+memory_test, check, gpu_bench = load("memory_test"), load("check_baseline"), load("gpu_bench")
 
 
 @pytest.fixture(autouse=True)
@@ -172,3 +172,16 @@ def test_seed_43_quick_run_records_its_seed_and_hash(setup):
     base = train.effective_config(setup.config, quick=True)
     assert rec["seed"] == 43 and rec["quick"] is True
     assert rec["config_hash"] == config_hash(dict(base, seed=43)) != config_hash(base)
+
+
+def test_gpu_bench_batches_look_like_the_loader(setup):
+    b = next(gpu_bench.random_batches(setup.cfg))
+    p = setup.cfg["train"]["patch"]
+    assert b["image"].shape == (1, 4, *p) and b["label"].shape == (1, 3, *p)
+    assert b["wt"].shape == (1, 1, *p) and set(b["label"].unique().tolist()) <= {0.0, 1.0}
+
+
+def test_gpu_bench_needs_a_gpu(monkeypatch, capsys):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert gpu_bench.main(["--steps", "1"]) == 1
+    assert "FAIL: no usable GPU" in capsys.readouterr().out
