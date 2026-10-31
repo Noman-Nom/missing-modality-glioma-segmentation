@@ -9,7 +9,16 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
-from monai.transforms import Compose, RandCropByPosNegLabeld, SpatialPadd, Transform
+import torch
+from monai.transforms import (
+    Compose,
+    MapTransform,
+    RandCropByPosNegLabeld,
+    RandFlipd,
+    RandomizableTransform,
+    SpatialPadd,
+    Transform,
+)
 
 # model channel order, fixed; files matched by suffix name, never by position
 MODALITIES = ("T1", "T1ce", "T2", "FLAIR")
@@ -51,6 +60,15 @@ def select_subjects(splits_csv, n_train, n_val, timepoint=0, exclude_flair_flag=
     assert all(fold_of[c] != "test" for c in train + val), "a test fold case was selected"
     assert not {subject_of(c) for c in train} & {subject_of(c) for c in val}, "subject overlap"
     return train, val
+
+
+def fold_cases(splits_csv, fold, timepoints=None, exclude_flair_flag=False):
+    """Sorted case IDs of one fold of splits.csv (spec 0003, AC-1). timepoints None = all."""
+    with open(splits_csv, newline="") as f:
+        rows = list(csv.DictReader(f))
+    return sorted(r["case"] for r in rows if r["fold"] == fold
+                  and (timepoints is None or int(r["timepoint"]) in timepoints)
+                  and not (exclude_flair_flag and r["flair_mask_flag"] == "True"))
 
 
 def subject_of(case):
@@ -161,6 +179,78 @@ class Preprocess(Transform):
 
 def items(data_dir, cases):
     return [{"case": c, "paths": case_paths(data_dir, c)} for c in cases]
+
+
+class CachedCase(Transform):
+    """{'case', 'npz'} -> the keys of Preprocess, read from the spec 0003 float16 cache."""
+
+    def __call__(self, d):
+        with np.load(d["npz"]) as z:
+            image, label, spacing = z["image"], z["label"], z["spacing"]
+        return {
+            "case": d["case"],
+            "image": image.astype(np.float32),
+            "label": label_to_regions(label).astype(np.float32),
+            "wt": (label > 0)[None].astype(np.uint8),
+            "pixdim": spacing.astype(np.float32),
+        }
+
+
+class RandBrainIntensityd(RandomizableTransform, MapTransform):
+    """Per channel c: x * (1 + s_c) + o_c on voxels where x != 0 before the step, with s_c and
+    o_c uniform in [-scale, scale] and [-shift, shift] (spec 0003, AC-5).
+
+    Background (0, including SpatialPadd padding) stays exactly 0. Draws only from self.R, so the
+    MONAI DataLoader seeds it per worker.
+    """
+
+    def __init__(self, keys, scale, shift, prob=1.0):
+        MapTransform.__init__(self, keys)
+        RandomizableTransform.__init__(self, prob)
+        self.scale, self.shift = scale, shift
+
+    def randomize(self, n):
+        super().randomize(None)
+        self.s = self.R.uniform(-self.scale, self.scale, n)
+        self.o = self.R.uniform(-self.shift, self.shift, n)
+
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.key_iterator(d):
+            x = d[key]
+            self.randomize(x.shape[0])
+            if not self._do_transform:
+                continue
+            out = x.clone() if isinstance(x, torch.Tensor) else x.copy()
+            for c in range(x.shape[0]):
+                brain = x[c] != 0  # the same per channel mask normalise() builds
+                out[c][brain] = x[c][brain] * (1 + float(self.s[c])) + float(self.o[c])
+            d[key] = out
+        return d
+
+
+def cached_items(cache_dir, cases):
+    return [{"case": c, "npz": str(Path(cache_dir) / f"{c}.npz")} for c in cases]
+
+
+def cached_eval_transforms(cfg):
+    return Compose([CachedCase()])
+
+
+def cached_train_transforms(cfg):
+    t = cfg["train"]
+    keys = ["image", "label", "wt"]
+    return Compose([
+        CachedCase(),
+        SpatialPadd(keys=keys, spatial_size=t["patch"], value=0),
+        RandCropByPosNegLabeld(keys=keys, label_key="wt", spatial_size=t["patch"],
+                               pos=t["pos"], neg=t["neg"], num_samples=1,
+                               image_key="image", image_threshold=0),
+        # AC-5: the same flip for image, label and wt, one coin per axis
+        *(RandFlipd(keys=keys, prob=t["flip_p"], spatial_axis=a) for a in range(3)),
+        RandBrainIntensityd(keys="image", scale=t["intensity_scale"],
+                            shift=t["intensity_shift"]),
+    ])
 
 
 def eval_transforms(cfg):

@@ -1,12 +1,15 @@
-"""Shared fixtures: tiny synthetic BraTS style cases (no real data, no GPU)."""
+"""Shared fixtures: tiny synthetic BraTS style cases and the spec 0003 CPU setup (no real data, no GPU)."""
 import csv
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 import pytest
 from common.data import MODALITIES, SUFFIX
+from common.runlog import dump_config, load_config
 
 SHAPE = (40, 40, 40)
+BASELINE_EXP = Path(__file__).resolve().parents[1] / "experiments" / "0003-baseline"
 
 
 def write_case(data_dir, case, seed=0, shape=SHAPE):
@@ -50,3 +53,31 @@ def synthetic_cases(tmp_path):
     write_splits(splits, [(c, "train", 0, False) for c in train]
                  + [(c, "val", 0, False) for c in val] + [("BraTS-GLI-00009-000", "test", 0, False)])
     return data, splits, train, val
+
+
+@pytest.fixture
+def setup(tmp_path, synthetic_cases):
+    """A tiny CPU config over the synthetic cases, its own cache dir; returns a small namespace."""
+    data, splits, train_cases, val_cases = synthetic_cases
+    cfg = load_config(BASELINE_EXP / "config.toml")
+    cfg["data"].update(splits_csv=str(splits), cache_dir=str(tmp_path / "cache"))
+    cfg["train"].update(iterations=2, val_every=2, patch=[32, 32, 32], num_workers=0)
+    cfg["model"].update(channels=[4, 8], strides=[2], num_res_units=1)
+    cfg["infer"]["roi"] = [32, 32, 32]
+    path = tmp_path / "config.toml"
+    dump_config(cfg, path)
+
+    class S:
+        pass
+
+    s = S()
+    s.cfg, s.config, s.data, s.splits = cfg, path, data, splits
+    s.train, s.val, s.cache, s.out = train_cases, val_cases, tmp_path / "cache", tmp_path / "results"
+    s.pre_argv = ["--config", str(path), "--data-dir", str(data)]
+    s.train_argv = ["--config", str(path), "--out", str(s.out), "--device", "cpu"]
+    return s
+
+
+def only_run(out):
+    (run,) = out.iterdir()
+    return run

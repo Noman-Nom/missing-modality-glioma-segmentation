@@ -41,7 +41,8 @@ Folder numbers are build order. E numbers (E0 to E7, defined in `context/project
 | E number | Thesis label | Folder |
 |---|---|---|
 | E0 | Data inspection | `0000-data-audit` |
-| E1 to E7 | Baseline, missing modality evaluation, strategies, extensions | folder added here when built |
+| E1 | Complete input baseline | `0003-baseline` |
+| E2 to E7 | Missing modality evaluation, strategies, extensions | folder added here when built |
 | none | Infrastructure: subject level split | `0001-splits` |
 | none | Infrastructure: tracer bullet | `0002-tracer-bullet` |
 
