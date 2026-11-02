@@ -39,10 +39,11 @@ def random_batches(cfg, seed=0):
 
 def driver_version():
     try:
-        return subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                              capture_output=True, text=True, check=True).stdout.strip()
+        out = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                             capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
+    return out.splitlines()[0].strip() if out.strip() else None  # one line per GPU, same driver
 
 
 def main(argv=None):
