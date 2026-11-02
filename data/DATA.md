@@ -33,6 +33,14 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 - **Quirk.** `BraTS-GLI-00011-000` and `BraTS-GLI-00014-000` contain a stray folder named `...-t1n.nii` / `...-t2w.nii` next to the normal `.nii.gz`. Load only `*.nii.gz`.
 - **Not done.** sha256, download date, licence and ethics status are still to be filled in by the human.
 
+## Private copy on Kaggle (for training, ADR 0002)
+
+- **Where.** Private Kaggle dataset `muhammadnomanned/brats-gli-train`, created 2026-11-01. Never make it public.
+- **What.** One file, `brats-gli-train.tar.bin`, 13,394,974,720 bytes: an uncompressed tar of `ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/` (1251 case folders, 6255 `.nii.gz` files). The notebook unpacks it with `tar -xf` (`experiments/0003-baseline/KAGGLE.md`).
+- **Why a tar with an odd name.** Kaggle unpacks `.zip` files and every `.nii.gz` inside them on upload. It writes plain `.nii` files, and where the gzip header carries an old file name it makes a folder, for example `BraTS-GLI-00011-000-t1c.nii/00000055_brain_t1ce.nii`. Our loader reads only `*.nii.gz`, so it would find nothing. With the two stray folders present, processing failed outright (tested 2026-11-01 with 3 cases: with the strays it failed, without them it passed). A `.tar.bin` is stored as one unopened file (tested with 1 case: same byte count on Kaggle).
+- **Left out.** The two stray folders `BraTS-GLI-00011-000/BraTS-GLI-00011-000-t1n.nii/` and `BraTS-GLI-00014-000/BraTS-GLI-00014-000-t2w.nii/`. They hold one raw `.nii` each and are not read by any script. The official zip from Synapse does not contain them (7507 entries, against 7511 in the local folder), so they were most likely made by an earlier local unpack.
+- **Terms.** The BraTS 2023 terms above are still "to confirm". Confirm that they allow a private copy on Kaggle before the thesis is submitted.
+
 ## Splits (experiment 0001)
 
 `data/splits/splits.csv` (committed, IDs only). It holds all 1251 labelled training cases (`N_LABELLED_CASES` in `check_splits.py`). Seed 42, subject level, stratified by subject WT-volume tertile x any-empty-ET. The 219 official validation cases have no labels and are not used for scores.

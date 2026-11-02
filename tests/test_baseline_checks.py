@@ -185,3 +185,10 @@ def test_gpu_bench_needs_a_gpu(monkeypatch, capsys):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert gpu_bench.main(["--steps", "1"]) == 1
     assert "FAIL: no usable GPU" in capsys.readouterr().out
+
+
+def test_gpu_bench_driver_prints_once_with_two_gpus(monkeypatch):
+    out = "580.178.04\n580.178.04\n"
+    monkeypatch.setattr(gpu_bench.subprocess, "run",
+                        lambda *a, **k: type("R", (), {"stdout": out})())
+    assert gpu_bench.driver_version() == "580.178.04"
