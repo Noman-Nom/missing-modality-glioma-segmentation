@@ -127,3 +127,27 @@ Decided while writing (recommended, not asked):
 **Why clipping.** It keeps the recipe the same on every normal step (a norm below 12 is untouched) and only trims spikes, so it's the least change that addresses the likely cause. The repeat forward passes in the diagnostics make the next failure, if any, tell its cause apart (input, fp16 only, or the weights), so the decision after that rests on evidence. This change comes before any val score was seen, so it is a fix to a crash, not retuning against results (AC-9).
 
 **Choices asked.** Clip value: 12 picked (nnU-Net practice as commonly reported, `isensee2021` entry unverified, so `[CITE?]` until a literature note exists), runner up 1.0. `grad_norm` column in `train_log.csv`: yes, runner up no.
+
+## Revision 2 2026-11-03: fp16 overflow on the second Kaggle run
+
+**What happened.** Run `20261103-013405-ddd7e800` (Kaggle T4, commit `e72af78`, seed 42, clipping at 12 in place) failed at iteration 669 on BraTS-GLI-00195-000, as before. The seeded run repeats exactly. Training had been healthy: loss falling from 1.72 to 1.36, `grad_norm` median 0.40 and maximum 3.08, one GradScaler skip (the usual first step).
+
+**What `failure` showed.** `n_nonfinite_input` 0, `params_finite` true, all 6,291,456 logits nan, `grad_scale` 32768, `first_nonfinite_module` `model.1.submodule.1.submodule.1.submodule.2.0.conv`, `fp32_loss_finite` true, no diagnostic error. So the data and the weights are healthy, and only the fp16 forward pass breaks. The named module is the transposed convolution of the up layer at the third level of the MONAI `UNet`, whose output comes before its instance norm. In a residual U-Net, values can grow along the residual paths between norms, past the fp16 limit (about 65,504).
+
+**What this says about Revision 1.** The clip was never active (no step above 3.08), so the "big update" theory was wrong. Clipping stays as a cheap safety rail, and the diagnostics did what they were built for: they named the cause on the first failure that followed.
+
+**A second risk found.** `predict()` uses the same `amp` flag. A val or test case that overflows in fp16 gives nan logits, and `sigmoid(nan) > 0.5` is false, so that case gets an empty mask silently and a wrong Dice.
+
+**Options considered.**
+
+| Option | For | Against |
+|---|---|---|
+| float32 for training and evaluation, `amp = false` (picked) | removes the overflow entirely, in training and evaluation alike; one recipe; no new code path (the amp off path is already tested on CPU) | slower (estimated 0.35 to 0.5 s per step against 0.269, not measured), so fewer seeds per weekly quota; about twice the activation memory |
+| fp16, redo a non finite step in float32 | keeps fp16 speed on normal steps | a second code path in the shared loop; hides activations that keep growing; evaluation needs its own fallback |
+| fp16 with a lower lr (3e-4) | cheap | changes the recipe on a guess; not a guaranteed fix, it may fail later |
+| fp16 except the decoder | middle speed | fiddly, and only one layer on one case is known to overflow; others may follow |
+| bf16 | fp32 range at 16 bit cost | the T4 (sm_75) has no fast bf16 support |
+
+**Why float32.** It is the only option that removes the failure rather than moving it, and it also closes the silent empty mask risk at evaluation. Speed is the cost, and the memory test measures it before training starts. The change comes from a crash before any val score was seen, so it is a fix, not retuning against results (AC-9). Picked by the engineer on 2026-11-03.
+
+**The 9 hour gate.** Step 7 already said to stop if the memory test projects more than 10 hours, but in a Save & Run All the notebook kept going after a FAIL. Making it a FAIL reason and gating cell 4 on `pass` (and on the config hash, so a stale file never counts) turns that rule into code, so an unfinishable run never spends GPU time. The limit is 9, not 10, because the projection covers only training and val; setup, caching, verify and evaluation add about 1.5 hours in the same 12 hour session. The cross check (Sonnet, 2026-11-03) raised this and the other step 9 gaps; the engineer applied the recommended fixes.

@@ -59,7 +59,7 @@ Run in this order and paste the last two lines of each:
 |---|---|---|
 | `preprocess.py` | 996 cases written, about 30 GB (estimated), `cache.json` folds `train,val` | AC-2, AC-4 |
 | `preprocess.py --verify` | every sha256 matches, 3 recomputed cases within tolerance | AC-2 |
-| `memory_test.py` | `PASS`, peak reserved below 3,584 MiB over 200 steps, val on the 2 largest val cases and 20 more steps; s/iter, data wait and projected hours printed. If `FAIL`, or projected above 10 h, stop and go back to `/architect` | AC-6 |
+| `memory_test.py` | `PASS`, peak reserved below 3,584 MiB over 200 steps, val on the 2 largest val cases and 20 more steps; s/iter, data wait and projected hours printed. If `FAIL` (since step 9 this includes projected above 9 h), stop and go back to `/architect` | AC-6 |
 | `train.py` | status `ok`, 40,000 iterations, 10 val points (time unknown until the memory test) | AC-7, AC-8, AC-10 |
 | `evaluate.py` | 342 rows, mean Dice per region printed | AC-13 |
 | `make_table.py` | `writing/tables/0003-baseline-val.tex` written | AC-14 |
@@ -104,3 +104,15 @@ _For build plan step 8 (gradient clipping and failure diagnostics). Fast, no GPU
 - [ ] Existing AC-11 and AC-12 tests still pass unchanged
 
 **Slow (human, on Kaggle):** rerun `experiments/0003-baseline/KAGGLE.md` from a fresh session and paste the last two lines of each step. Afterwards read the max of `grad_norm` and how many rows exceed 12, from `train_log.csv` → AC-7 follow-up.
+
+## float32 checks · added 2026-11-03
+_For build plan step 9. Fast, no GPU, no real data._
+
+- [ ] `uv run pytest -q` → all fast tests pass; `uv run ruff check .` clean
+- [ ] `experiments/0003-baseline/config.toml` has `amp = false` (a test reads the committed file) → AC-7
+- [ ] `memory_test.py` with the projection monkeypatched: 9.1 h gives `FAIL: projected 9.1 h > 9` and exit 1, 9.0 h passes, `None` fails → AC-6
+- [ ] `check_baseline.py` fails a run whose `config.toml` has `amp = true` → AC-16
+- [ ] `KAGGLE.md` cell 4 reads `memory_test.json`, requires `pass` true and the current `config_hash`, and calls `raise SystemExit(1)` otherwise, before `train.py` → AC-6
+- [ ] Existing AC-7 and AC-12 tests still pass unchanged (the CPU path already runs with amp off)
+
+**Slow (human, on Kaggle):** a fresh Save & Run All. Check `memory_test` PASS with its s/iter and projected hours, then that `train.py` goes past iteration 669 and finishes `ok`, then the AC-16 check → AC-6, AC-7, AC-16.
