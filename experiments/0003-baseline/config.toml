@@ -26,6 +26,7 @@ num_workers = 4
 lr = 1e-3
 weight_decay = 1e-5
 amp = true
+grad_clip = 12.0
 flip_p = 0.5
 intensity_scale = 0.1
 intensity_shift = 0.1

@@ -37,17 +37,27 @@ RUN_KEYS = (
     "scaler_skipped_steps", "loss_window", "loss_start_mean", "loss_end_mean", "train_cases",
     "val_cases", "peak_vram_allocated_mib", "peak_vram_reserved_mib", "wall_time_s",
     "iterations", "n_params", "cache_dir", "cache_hash", "seconds_per_iteration", "val_history",
-    "best_iteration", "best_score", "failed_iteration", "resumes",
+    "best_iteration", "best_score", "failed_iteration", "resumes", "failure",
 )
-LOG_COLUMNS = ["iteration", "loss", "dice_loss", "bce_loss", "lr", "seconds",
+LOG_COLUMNS = ["iteration", "loss", "dice_loss", "bce_loss", "lr", "grad_norm", "seconds",
                "val_wt", "val_tc", "val_et", "val_score"]
+# the run.json failure object on a non finite loss (spec 0003, failure keys table, AC-12)
+FAILURE_KEYS = (
+    "iteration", "cases", "n_nonfinite_input", "n_nonfinite_logits", "max_abs_finite_logit",
+    "dice_loss", "bce_loss", "params_finite", "grad_scale", "first_nonfinite_module",
+    "fp32_loss_finite", "diagnostic_error",
+)
 VAL_COLUMNS = ["iteration", "pattern_id", "case", "region", "dice", "gt_empty", "pred_empty"]
 BATCH_KEYS = ("case", "image", "label", "wt")
 SELECTION_PATTERN = 1  # complete input
 
 
 class NonFiniteLoss(RuntimeError):
-    pass
+    """A non finite loss; .failure holds the run.json failure object (AC-12)."""
+
+    def __init__(self, msg, failure=None):
+        super().__init__(msg)
+        self.failure = failure
 
 
 def identity(batch, rng):
@@ -58,9 +68,28 @@ def identity(batch, rng):
 def check_config(cfg):
     """Problems that must stop a run before it starts (exit 2), as strings; empty = fine."""
     t = cfg["train"]
+    problems = []
     if t["iterations"] % t["val_every"]:
-        return [f"iterations {t['iterations']} is not a multiple of val_every {t['val_every']}"]
-    return []
+        problems.append(f"iterations {t['iterations']} is not a multiple of val_every "
+                        f"{t['val_every']}")
+    clip = t.get("grad_clip")
+    if clip is None:
+        problems.append("[train] grad_clip is missing")
+    elif isinstance(clip, bool) or not isinstance(clip, int | float) or not clip > 0:
+        problems.append(f"[train] grad_clip must be a number above 0, got {clip!r}")
+    return problems
+
+
+def _json_float(v):
+    """float(v), with nan and inf as strings so run.json stays strict JSON (AC-12)."""
+    v = float(v)
+    return v if math.isfinite(v) else str(v)
+
+
+def _has_nonfinite(out):
+    ts = out if isinstance(out, tuple | list) else (out,)
+    return any(isinstance(o, torch.Tensor) and o.is_floating_point()
+               and not torch.isfinite(o).all() for o in ts)
 
 
 def lr_factor(i, warmup, iterations):
@@ -192,7 +221,8 @@ class Trainer:
 
     def step(self, it, batch_hook=identity, inject_at=None):
         """One training iteration. Returns loss, dice_loss, bce_loss, lr (the one applied),
-        seconds (the whole step, data wait included) and data_wait."""
+        grad_norm (total norm before the clip), seconds (the whole step, data wait included)
+        and data_wait. A non finite loss raises NonFiniteLoss with .failure filled (AC-12)."""
         t0 = time.time()
         b = next(self.batches)
         wait = time.time() - t0
@@ -208,10 +238,22 @@ class Trainer:
         ld, lb = self.dice_loss(logits, y), self.bce_loss(logits, y)
         loss = ld + lb
         if not torch.isfinite(loss):  # never skipped (AC-12)
-            raise NonFiniteLoss(f"non finite loss at iteration {it}")
+            cases = batch["case"]
+            failure = self._failure_stats(it, cases, x, logits, ld, lb)
+            del logits, ld, lb, loss  # free the graph before the repeat passes
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+            failure.update(self._repeat_passes(x, y))
+            raise NonFiniteLoss(f"non finite loss at iteration {it} in {', '.join(cases)}",
+                                failure)
         self.opt.zero_grad(set_to_none=True)
         self.scaler.scale(loss).backward()
         scale = self.scaler.get_scale()
+        if self.amp:
+            self.scaler.unscale_(self.opt)  # clip the true gradients, not the scaled ones
+        # inf or nan when GradScaler is about to skip this step; that is not a failure (AC-7)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(),
+                                                   self.cfg["train"]["grad_clip"]).item()
         self.scaler.step(self.opt)
         self.scaler.update()
         if self.amp and self.scaler.get_scale() < scale:
@@ -219,7 +261,57 @@ class Trainer:
         lr = self.opt.param_groups[0]["lr"]
         self.sched.step()
         return {"loss": loss.item(), "dice_loss": ld.item(), "bce_loss": lb.item(), "lr": lr,
-                "seconds": time.time() - t0, "data_wait": wait}
+                "grad_norm": grad_norm, "seconds": time.time() - t0, "data_wait": wait}
+
+    def _failure_stats(self, it, cases, x, logits, ld, lb):
+        """The failure keys known from the failing pass itself (AC-12)."""
+        finite = logits[torch.isfinite(logits)]
+        return {
+            "iteration": it, "cases": list(cases),
+            "n_nonfinite_input": int((~torch.isfinite(x)).sum()),
+            "n_nonfinite_logits": int((~torch.isfinite(logits)).sum()),
+            "max_abs_finite_logit": float(finite.abs().max()) if finite.numel() else None,
+            "dice_loss": _json_float(ld), "bce_loss": _json_float(lb),
+            "params_finite": all(bool(torch.isfinite(p).all())
+                                 for p in self.model.parameters()),
+            "grad_scale": self.scaler.get_scale() if self.amp else None,
+            "first_nonfinite_module": None, "fp32_loss_finite": None, "diagnostic_error": None,
+        }
+
+    def _forward(self, x, amp):
+        """One forward pass with no gradients, for the repeat passes (tests patch this)."""
+        with torch.no_grad(), torch.autocast(device_type=self.device.type,
+                                             dtype=torch.float16, enabled=amp):
+            return self.model(x)
+
+    def _repeat_passes(self, x, y):
+        """The same x and y again: fp16 with hooks naming the first module whose output is non
+        finite, then float32. Any error lands in diagnostic_error (AC-12)."""
+        out, first, handles = {}, [], []
+
+        def hook(name):
+            def f(module, inputs, output):
+                if not first and _has_nonfinite(output):
+                    first.append(name)  # hooks fire innermost first: the deepest module
+            return f
+
+        try:
+            for name, m in self.model.named_modules():
+                handles.append(m.register_forward_hook(hook(name)))
+            self._forward(x, self.amp)
+            for h in handles:
+                h.remove()
+            handles = []
+            out["first_nonfinite_module"] = first[0] if first else None
+            logits = self._forward(x, False).float()
+            loss = self.dice_loss(logits, y) + self.bce_loss(logits, y)
+            out["fp32_loss_finite"] = bool(torch.isfinite(loss))
+        except Exception as e:  # noqa: BLE001  any error, OOM included, per AC-12
+            out["diagnostic_error"] = (str(e).splitlines() or [type(e).__name__])[0]
+        finally:
+            for h in handles:
+                h.remove()
+        return out
 
     def full_state(self):
         """Everything last.pt holds beyond the best.pt fields (AC-11)."""
@@ -326,7 +418,8 @@ def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, val_patterns
             prog.losses.append(s["loss"])
             prog.step_seconds.append(s["seconds"])
             prog.seg_seconds += s["seconds"]
-            row = [it, s["loss"], s["dice_loss"], s["bce_loss"], s["lr"], round(s["seconds"], 4)]
+            row = [it, s["loss"], s["dice_loss"], s["bce_loss"], s["lr"], s["grad_norm"],
+                   round(s["seconds"], 4)]
             rec.update(iterations=it, scaler_skipped_steps=tr.skipped)
             if it % t["val_every"] == 0:
                 row += _val_point(tr, rec, run_dir, it, val_patterns, prog)
@@ -384,7 +477,7 @@ def _resume_record(run_dir, state, commit, dirty):
               "recorded in run.json resumes")
     rec = RunRecord(
         run_dir, keys=RUN_KEYS, defaults={k: v for k, v in old.items() if k != "status"},
-        reason=None, failed_iteration=None, iterations=start,
+        reason=None, failed_iteration=None, failure=None, iterations=start,
         best_score=state["best_score"], best_iteration=state["best_iteration"],
         scaler_skipped_steps=state["scaler_skipped_steps"],
         val_history=[v for v in old["val_history"] if v["iteration"] <= start],
@@ -441,7 +534,8 @@ def train(cfg, run_dir, run_id, train_cases, val_cases, *, device, quick=False,
                    failed_iteration=prog.it)
         code = 1
     except NonFiniteLoss as e:
-        rec.update(status="failed", reason=str(e), failed_iteration=prog.it)
+        rec.update(status="failed", reason=str(e), failed_iteration=prog.it,
+                   failure=e.failure)
         code = 1
     except KeyboardInterrupt:
         rec.update(status="interrupted", reason="Ctrl+C")
