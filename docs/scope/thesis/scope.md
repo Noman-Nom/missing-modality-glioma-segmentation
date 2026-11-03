@@ -112,7 +112,8 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
   - [x] Thin thread: `fold_cases()`, float16 cache and `preprocess.py`, minimal shared loop, `train.py`, `evaluate.py`, `make_table.py`, quick run on synthetic cases (AC-1, AC-2, AC-3, AC-4, AC-10, AC-13, AC-14, AC-17)
   - [x] Thicken: warmup and cosine lr, val with patterns and selection, write order, augmentation (AC-5, AC-7, AC-8)
   - [x] Robustness and checks: full state resume, failures, `--verify`, `memory_test.py`, `check_baseline.py`, determinism tests, docs (AC-6, AC-9, AC-11, AC-12, AC-15, AC-16, AC-18)
-  - [ ] Human runs: preprocess, verify, memory test, full training, evaluate, table, check (AC-2, AC-6, AC-7, AC-8, AC-9, AC-13, AC-16)
+  - [ ] Human runs: preprocess, verify, memory test, full training, evaluate, table, check (AC-2, AC-6, AC-7, AC-8, AC-9, AC-13, AC-16). First Kaggle run 2026-11-03 failed at iteration 669 (non finite loss); rerun after the stability fix
+  - [x] Stability fix (build plan step 8, from spec update 2026-11-03): gradient clip at 12, `grad_norm` column, `failure` diagnostics, tests (AC-7, AC-10, AC-12, AC-18)
 - [ ] Verify it: /check verify E1 complete-input baseline
 - [ ] Test it: /test E1 complete-input baseline
 

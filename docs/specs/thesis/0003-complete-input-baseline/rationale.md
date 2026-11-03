@@ -106,3 +106,24 @@ Decided while writing (recommended, not asked):
 | Resume loader seed | `seed * 100003 + iteration` | deterministic and distinct per resume point | reuse the original seed |
 | Sanity floor | `best_score > 0.60` | a loose floor fixed before any number, which catches a broken run without tuning to a target | no floor |
 | Cache dir name | `data/processed/0003-baseline/` | confirmed in the data model review | a dataset named folder |
+
+## Revision 2026-11-03: non finite loss on the first Kaggle run
+
+**What happened.** Run `20261103-000625-55df892d` (Kaggle T4, commit `169bf0a`, seed 42) passed caching, `--verify` and the memory test (970 MiB peak, 0.260 s/iter), then failed with `non finite loss at iteration 669` after 177 s of training. The loss was healthy: the mean of the first 50 iterations was 1.722, of the last 50 was 1.361, and iteration 668 logged 1.277. No `last.pt` existed yet, so nothing could be resumed.
+
+**What was ruled out.** Replaying the seeded sampler order gives BraTS-GLI-00195-000 at iteration 669 (BraTS-GLI-00327-000 at 668). Preprocessed from the raw files, every channel of both cases is within −3.3 to 6.2 and finite after the float16 cast. So the input is not the cause. The loss had not been rising, so a learning rate that is simply too high does not fit either.
+
+**Most likely cause (not proven).** fp16 overflow in the forward pass: an activation or logit above the fp16 limit (about 65,504) becomes inf. It came 169 steps after warmup ended, at the peak lr of 1e-3, where one large AdamW update after a gradient spike can push weights far enough. There were no weights to test this on.
+
+**Options considered.**
+
+| Option | For | Against |
+|---|---|---|
+| Clip the gradient norm at 12 after unscaling, plus failure diagnostics (picked) | standard practice for fp16 training, about no cost in speed, the diagnostics prove the cause if it happens again | the clip value is from practice, not tuned; does not stop an overflow that clipping cannot prevent |
+| Turn amp off (float32) | removes fp16 overflow completely | about 2 to 3 times slower on a T4 (estimated, not measured), near the 12 hour session limit; T4 has no bf16 |
+| Lower lr or longer warmup | simple | a guess with no evidence, and it changes the training recipe more than a safety clip does |
+| Rerun unchanged with diagnostics only | proves the cause first | likely loses another 30 minutes of GPU time to the same failure |
+
+**Why clipping.** It keeps the recipe the same on every normal step (a norm below 12 is untouched) and only trims spikes, so it's the least change that addresses the likely cause. The repeat forward passes in the diagnostics make the next failure, if any, tell its cause apart (input, fp16 only, or the weights), so the decision after that rests on evidence. This change comes before any val score was seen, so it is a fix to a crash, not retuning against results (AC-9).
+
+**Choices asked.** Clip value: 12 picked (nnU-Net practice as commonly reported, `isensee2021` entry unverified, so `[CITE?]` until a literature note exists), runner up 1.0. `grad_norm` column in `train_log.csv`: yes, runner up no.

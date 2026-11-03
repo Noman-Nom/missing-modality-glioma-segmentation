@@ -89,3 +89,18 @@ _Added by /develop after milestone 3. The fast table above names a planned `test
 
 ### Acceptance criteria coverage
 - AC-2 verify and disk · AC-6 wiring (the GPU number is the human step) · AC-9, AC-16 check script · AC-11 resume · AC-12 failures · AC-15 determinism. AC-18 is the E1 row in `experiments/AGENTS.md` plus the two docs.
+
+## Stability fix checks · added 2026-11-03
+_For build plan step 8 (gradient clipping and failure diagnostics). Fast, no GPU, no real data._
+
+- [ ] `uv run pytest -q` → all fast tests pass, including the new ones below; `uv run ruff check .` clean
+- [ ] Quick CPU run (float32, so no scaler skips): `train_log.csv` header is `iteration, loss, dice_loss, bce_loss, lr, grad_norm, seconds, val_wt, val_tc, val_et, val_score`, and `grad_norm` is finite on every row → AC-7, AC-10
+- [ ] Clip unit test: with `grad_clip` tiny (for example 1e-3), the total gradient norm after `Trainer.step()` clips is at most `grad_clip + 1e-6`, and the logged `grad_norm` is the value before the clip → AC-7
+- [ ] Config: `grad_clip = 0`, a negative value and a missing key each give exit 2 → AC-7
+- [ ] `BASELINE_INJECT_INF=7`: `run.json` `failure` has every *failure keys* entry, `cases` is the batch's case, `n_nonfinite_input` above 0, `params_finite` true, `fp32_loss_finite` false (the input is inf in both passes), `first_nonfinite_module` not null (the first conv the input meets), `max_abs_finite_logit` null, `dice_loss` or `bce_loss` the string `"nan"` or `"inf"`, `run.json` parses with a strict JSON reader (`json.loads` with `parse_constant` raising), `diagnostic_error` null, reason `non finite loss at iteration 7 in <case>`; after the resume `failure` is null → AC-12
+- [ ] Diagnostic pass that raises (monkeypatch the repeat forward to raise): status still `failed` with the original reason, exit 1, `failure.diagnostic_error` holds the error text → AC-12
+- [ ] OOM test: `failure` stays null (no diagnostics after an OOM) → AC-12
+- [ ] The fp16 hooks are gone after the diagnostics (no module has a forward hook left) → AC-12
+- [ ] Existing AC-11 and AC-12 tests still pass unchanged
+
+**Slow (human, on Kaggle):** rerun `experiments/0003-baseline/KAGGLE.md` from a fresh session and paste the last two lines of each step. Afterwards read the max of `grad_norm` and how many rows exceed 12, from `train_log.csv` → AC-7 follow-up.
