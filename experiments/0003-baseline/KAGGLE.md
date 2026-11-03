@@ -30,7 +30,7 @@ E1 trains on a free Kaggle Tesla T4 (ADR 0002). The GPU check is step 1, the dat
 
 The code and the environment live in `/tmp`, so they do not fill `/kaggle/working`, which is the folder Kaggle saves as output. `uv sync --frozen` installs exactly what `uv.lock` pins.
 
-Result on 2026-10-31: Tesla T4 (sm_75), 2 visible, driver 580.178.04, torch 2.14.1+cu130, 0.201 s/iter (2.2 h for 40,000 steps), peak reserved 898 MiB. Laptop: 0.764 s/iter (8.5 h). A `FAIL: ...` line means CUDA 13 does not work there: stop and decide in the main chat.
+Result on 2026-10-31: Tesla T4 (sm_75), 2 visible, driver 580.178.04, torch 2.14.1+cu130, 0.201 s/iter (2.2 h for 40,000 steps, fp16, before E1 moved to float32), peak reserved 898 MiB. Laptop: 0.764 s/iter (8.5 h). A `FAIL: ...` line means CUDA 13 does not work there: stop and decide in the main chat.
 
 ## Step 2: data (done 2026-11-01)
 
@@ -87,11 +87,28 @@ The count must be **1251**. The search finds the file wherever Kaggle mounts the
 
 The cache (about 35 GB) goes to `/tmp/repo/data/processed/0003-baseline/`. `preprocess.py` stops with exit 2 if the disk is too small; then stop and decide in the main chat.
 
-**Cell 4: training (about 2.2 h of steps, plus validation)**
+**Cell 4: training, only after a memory test PASS (time measured by the memory test, at most 9 h)**
 
 ```python
+import json, subprocess
+MEM = "/kaggle/working/results/0003-baseline/memory_test.json"
+HASH = ("import sys; sys.path.insert(0, 'experiments'); "
+        "from common.runlog import config_hash, load_config; "
+        "print(config_hash(load_config('experiments/0003-baseline/config.toml')))")
+now = subprocess.run(["uv", "run", "python", "-c", HASH], capture_output=True, text=True,
+                     check=True).stdout.strip()
+try:
+    mem = json.load(open(MEM))
+except FileNotFoundError:
+    mem = None
+if mem is None or mem["pass"] is not True or mem["config_hash"] != now:
+    print("NOT TRAINING: no memory test PASS for this config:",
+          mem and {k: mem[k] for k in ("pass", "projected_hours", "config_hash")})
+    raise SystemExit(1)  # stops Save & Run All here, so cell 5 never runs
 !uv run python experiments/0003-baseline/train.py --out /kaggle/working/results/0003-baseline
 ```
+
+Since spec 0003 step 9, E1 trains in float32 (`amp = false`), and `memory_test.py` fails when the projection is above 9 hours. The gate also checks the config hash, so a `memory_test.json` from another config never counts. A full run's config equals `config.toml` as committed (no `--quick`, no `--seed`), so its hash is the one computed here.
 
 **Cell 5: evaluation, table and check**
 

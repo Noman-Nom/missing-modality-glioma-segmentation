@@ -3,10 +3,11 @@
     uv run python experiments/0003-baseline/memory_test.py    # human, on the GPU, before train.py
 In one process, through the same common/training.py code as train.py: [memory_test] steps
 training steps on the train fold, a val phase on the 2 largest val cases, then 20 more steps.
-PASS when the peak reserved VRAM over the whole process is below [memory_test] limit_mib.
+PASS when the peak reserved VRAM over the whole process is below [memory_test] limit_mib and
+the projected hours are at most MAX_HOURS (so the run fits a 12 hour Kaggle session).
 Writes results/0003-baseline/memory_test.json (peaks, s/iter over steps 51 on, data wait per
 step, val seconds, projected hours for the full run). Never reads the test fold.
-Exit 0 pass, 1 peak at or above the limit, OOM or no GPU (a CPU run never passes), 2 bad config
+Exit 0 pass, 1 peak at or above the limit, projected hours above MAX_HOURS, OOM or no GPU (a CPU run never passes), 2 bad config
 or cache guard.
 """
 import argparse
@@ -31,6 +32,9 @@ REPO = HERE.parents[1]
 EXTRA_STEPS = 20
 SKIP_STEPS = 50  # warm up: s/iter is the mean over the steps after these
 N_VAL_CASES = 2
+# training plus val; setup, caching, verify and evaluation take about 1.5 h more of the 12 h
+# Kaggle session (spec 0003, AC-6)
+MAX_HOURS = 9
 KEYS = ("peak_vram_allocated_mib", "peak_vram_reserved_mib", "seconds_per_iteration",
         "data_wait_s_per_step", "val_cases", "val_seconds", "projected_hours", "config_hash",
         "pass")
@@ -55,6 +59,21 @@ def projected_hours(s_per_it, val_seconds, n_val, t):
     """Training plus val time of the full run; val uses the largest cases, so it overestimates."""
     return (s_per_it * t["iterations"]
             + val_seconds * n_val * t["iterations"] / t["val_every"]) / 3600
+
+
+def failure_reason(oom, peak_reserved, limit, hours):
+    """Why the memory test fails, checked in this order, or None when it passes (AC-6)."""
+    if oom:
+        return oom
+    if peak_reserved is None:
+        return "no GPU, peak VRAM not measured (a CPU run never passes)"
+    if peak_reserved >= limit:
+        return f"peak reserved VRAM {peak_reserved:.1f} MiB >= {limit}"
+    if hours is None:
+        return "projected hours not measured"
+    if hours > MAX_HOURS:
+        return f"projected {hours:.1f} h > {MAX_HOURS}"
+    return None
 
 
 def main(argv=None):
@@ -104,12 +123,9 @@ def main(argv=None):
     val_s = statistics.mean(val_times) if val_times else None
     peaks = ((torch.cuda.max_memory_allocated() / 2**20, torch.cuda.max_memory_reserved() / 2**20)
              if device.type == "cuda" else (None, None))
-    if failure is None and peaks[1] is None:
-        failure = "no GPU, peak VRAM not measured (a CPU run never passes)"
-    if failure is None and peaks[1] >= limit:
-        failure = f"peak reserved VRAM {peaks[1]:.1f} MiB >= {limit}"
     hours = (projected_hours(s_it, val_s, len(val_cases), t)
              if s_it is not None and val_s is not None else None)
+    failure = failure_reason(failure, peaks[1], limit, hours)
     result = dict(zip(KEYS, (*peaks, s_it, wait, val_big, val_s, hours, config_hash(cfg),
                              failure is None)))
     out = Path(a.out)

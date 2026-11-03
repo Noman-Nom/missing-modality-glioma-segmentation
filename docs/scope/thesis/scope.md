@@ -114,7 +114,7 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
   - [x] Robustness and checks: full state resume, failures, `--verify`, `memory_test.py`, `check_baseline.py`, determinism tests, docs (AC-6, AC-9, AC-11, AC-12, AC-15, AC-16, AC-18)
   - [ ] Human runs: preprocess, verify, memory test, full training, evaluate, table, check (AC-2, AC-6, AC-7, AC-8, AC-9, AC-13, AC-16). First Kaggle run 2026-11-03 failed at iteration 669 (non finite loss); the rerun after the stability fix failed the same way, diagnosed as fp16 overflow; rerun after the float32 change
   - [x] Stability fix (build plan step 8, from spec update 2026-11-03): gradient clip at 12, `grad_norm` column, `failure` diagnostics, tests (AC-7, AC-10, AC-12, AC-18)
-  - [ ] float32 (build plan step 9, from spec update 2026-11-03): `amp = false`, 9 h memory test gate, gated Kaggle cell 4, `amp` check in `check_baseline.py`, tests (AC-6, AC-7, AC-16, AC-18)
+  - [x] float32 (build plan step 9, from spec update 2026-11-03): `amp = false`, 9 h memory test gate, gated Kaggle cell 4, `amp` check in `check_baseline.py`, tests (AC-6, AC-7, AC-16, AC-18)
 - [ ] Verify it: /check verify E1 complete-input baseline
 - [ ] Test it: /test E1 complete-input baseline
 

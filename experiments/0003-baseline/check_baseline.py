@@ -51,6 +51,8 @@ def structure(run):
     need((run / "config.toml").is_file(), "config.toml missing")
     cfg = load_config(run / "config.toml")
     need(config_hash(cfg) == rec["config_hash"], "config.toml hash differs from run.json")
+    need(cfg["train"]["amp"] is False,
+         "config.toml has amp on; E1 trains and evaluates in float32 (spec 0003, AC-16)")
     info = read_cache_json(cache_dir(cfg))
     need(rec["cache_hash"] == preprocess_hash(cfg), "cache hash differs from the run's config")
     need(info is not None and info["preprocess_hash"] == rec["cache_hash"],
