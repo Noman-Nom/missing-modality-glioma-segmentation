@@ -1,6 +1,6 @@
 # 0003. Complete input baseline (E1): a wider 3D U-Net trained on the full train fold, chosen on val
 
-**Date**: 2026-10-27
+**Date**: 2026-10-27 · updated 2026-11-03 (gradient clipping and failure diagnostics, after the first Kaggle run failed at iteration 669)
 **Status**: In Progress
 
 ## Summary
@@ -21,12 +21,12 @@ E1 trains the reference model that every missing modality strategy is compared a
 - **AC-4**: E1 reads no test fold case. Every case that `train.py`, `memory_test.py` and `evaluate.py` load is asserted to be in fold `train` or `val` before loading. The E1 cache manifest has no `test` row after the E1 steps, and `run.json` lists every train and val case used.
 - **AC-5**: Training augmentation, in this order after the random patch crop: `RandFlipd` on each of the 3 spatial axes (p 0.5 each, the same flip for `image`, `label`, `wt`), then `RandBrainIntensityd`, which per channel c multiplies by `1 + s` and adds `o`, with `s` and `o` drawn uniformly in [−0.1, 0.1] per channel (p 1.0), only on voxels where `image[c] != 0` before the step (a per channel mask, the same one `normalise()` builds per modality; padding from `SpatialPadd` is 0 and so counts as background). Background voxels stay exactly 0. Brain voxels that happen to be exactly 0 are left untouched, which is negligible. `RandBrainIntensityd` subclasses MONAI `RandomizableTransform` and `MapTransform` and draws only from `self.R`, never from global NumPy or torch state, so MONAI's `DataLoader` `worker_init_fn` seeds it per worker. Val and evaluation get no augmentation.
 - **AC-6**: The model is MONAI `UNet` (3D, in 4, out 3) with channels (32, 64, 128, 256, 320), strides (2, 2, 2, 2), `num_res_units=2`, trained on 128^3 patches at batch 1. `memory_test.py` runs, in one process with the full config and the same `common/training.py` code paths, 200 training steps on real cached train cases, then a val phase on the 2 largest val cases (by cropped voxel count from `manifest.csv`), then 20 more training steps. It passes when peak reserved VRAM over the whole process is below 3,584 MiB, and writes `memory_test.json` (peaks, mean s/iter over steps 51 to 200, mean data loading wait per step, the val cases and their mean seconds, and the projected hours for the full run).
-- **AC-7**: Training runs `iterations = 40000` with AdamW (lr 1e-3, weight decay 1e-5), fp16 autocast with `GradScaler`, and Dice plus BCE loss as in spec 0001. Iteration i (counted from 1) uses lr `lr * i / warmup` for i ≤ `warmup`, and otherwise `lr * 0.5 * (1 + cos(pi * (i - warmup) / (iterations - warmup)))`, so the last step runs at lr 0 (built with `LambdaLR`; the logged `lr` is the one applied at step i). `GradScaler` and autocast are enabled only when `amp` is true and the device is CUDA, so CPU runs use plain float32. A config where `iterations` is not a multiple of `val_every` is rejected at load (exit 2).
+- **AC-7**: Training runs `iterations = 40000` with AdamW (lr 1e-3, weight decay 1e-5), fp16 autocast with `GradScaler`, and Dice plus BCE loss as in spec 0001. Every step clips gradients: after `scaler.scale(loss).backward()` comes `scaler.unscale_(opt)` (only when the scaler is enabled), then `torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)` with `grad_clip = 12.0` from `[train]`, then `scaler.step(opt)`. The total norm that call returns (before clipping) is returned by `step()` as the key `grad_norm` and logged in `train_log.csv` on every row (a val row carries the value of its training step; never blank). On a step GradScaler skips, that norm is inf or nan; it is written as Python writes the float (`inf`, `nan`) and is not a failure (AC-12). `clip_grad_norm_` keeps its default `error_if_nonfinite=False`. `check_config()` reads `grad_clip` with `get()` and rejects a missing key, a bool, a non number, or a value at or below 0 as a problem (exit 2). Iteration i (counted from 1) uses lr `lr * i / warmup` for i ≤ `warmup`, and otherwise `lr * 0.5 * (1 + cos(pi * (i - warmup) / (iterations - warmup)))`, so the last step runs at lr 0 (built with `LambdaLR`; the logged `lr` is the one applied at step i). `GradScaler` and autocast are enabled only when `amp` is true and the device is CUDA, so CPU runs use plain float32. A config where `iterations` is not a multiple of `val_every` is rejected at load (exit 2).
 - **AC-8**: Every `val_every = 4000` iterations (10 val points, the last at 40,000), `validate(model, val_cases, patterns)` predicts all 114 val cases with `common.model.predict()` and the `[infer]` settings for each pattern ID in `patterns` (applied with `apply_pattern()`; E1 passes `[1]`, complete input), and `region_metrics()` Dice is computed per case, pattern and region. `torch.cuda.empty_cache()` runs before and after each val phase. One row per (iteration, pattern_id, case, region) goes to `val_log.csv`. The E1 selection score is the mean over WT, TC and ET of the mean Dice over the val cases at pattern 1. `best.pt` is written when the score is strictly higher than every earlier one (a tie keeps the earlier one). `run.json` holds `best_iteration`, `best_score` and the full `val_history`. At each val point the writes happen in this order, each through a temp file and rename: `val_log.csv` rows, then `best.pt` (if improved), then `last.pt`, then `run.json`.
 - **AC-9**: Learning signal sanity floor, set before any E1 number is seen: mean `loss` over the last 50 iterations is below the mean over the first 50, and `best_score` is above 0.60. If it fails, the run is investigated, not retuned until it passes.
 - **AC-10**: Every run writes `run.json` with exactly the keys in the *run.json keys* table, copies the effective config to the run folder as `config.toml`, and prints the run dir, config hash, seed and git commit at start. In `train_log.csv`, `seconds` is the wall time of that one step (data wait included). In `run.json`, `wall_time_s` sums all segments including redone iterations, and the peaks (training and val together), wall time and `scaler_skipped_steps` are written at every val point and at exit. The seed comes from `seed` in the config, and `--seed N` overrides it before hashing, so each seed gets its own config hash and run folder.
 - **AC-11**: At each val point, `last.pt` is overwritten with the full training state (model, optimiser, scheduler, scaler, iteration, best score and best iteration so far, `scaler_skipped_steps`, the hook generator state, and the torch, CUDA, NumPy and Python RNG states). `train.py --resume <run_dir>` restores that state exactly, rewrites `train_log.csv` and `val_log.csv` without the rows after the restored iteration, and drops the `val_history` entries after it. If `best.pt` holds an iteration after the restored one, it is deleted, and the best score and iteration from `last.pt` apply. The data loader and its iterator are built fresh, with the generator seeded from `seed * 100003 + iteration`, and training continues from the next iteration. Resume is refused with exit 2 if status is `ok`, if status is `running` and the process in `train.pid` is alive, if the run's `config.toml` hash differs from `run.json` `config_hash`, or if the cache hash differs from `run.json` `cache_hash`. A git commit different from the original prints a warning and is recorded. Each resume adds one entry to `run.json` `resumes`.
-- **AC-12**: A non finite loss (checked every step before backward) or a CUDA out of memory error sets status `failed` with the reason and the iteration, and exits 1. Ctrl+C sets `interrupted` and exits 130. In each case the last `last.pt` stays usable for `--resume`. A non finite loss is never skipped. Steps that GradScaler skips for inf gradients (detected when `scaler.get_scale()` is lower after `scaler.update()` than before) are counted in `scaler_skipped_steps`, which carries across resumes through `last.pt`, and are not treated as failures.
+- **AC-12**: A non finite loss (checked every step before backward) or a CUDA out of memory error sets status `failed` with the reason and the iteration, and exits 1. Ctrl+C sets `interrupted` and exits 130. In each case the last `last.pt` stays usable for `--resume`. A non finite loss is never skipped. On a non finite loss, before exiting, `run.json` `failure` gets the diagnostics in the *failure keys* table (case IDs, which of input, logits and parameters were non finite, the largest finite logit, both loss terms, the grad scale, and one extra forward pass of the same batch with no gradients, once under fp16 autocast with hooks naming the first module whose output is non finite, and once in float32 saying whether the loss is then finite). The reason reads `non finite loss at iteration <i> in <case>`. If the diagnostic pass itself raises (any `Exception`, OOM included), the first line of its error text goes into `failure.diagnostic_error` and the run still fails with the original reason. How it is wired: `Trainer.step()` builds the `failure` dict just before raising `NonFiniteLoss` and attaches it to the exception as `.failure`; the `except NonFiniteLoss` branch of `train()` puts it in the record, so it lands in the single `run.json` write at exit. Before the repeat passes, `step()` drops its logits and calls `torch.cuda.empty_cache()` on CUDA. Both passes run under `torch.no_grad()` on the exact `x` and `y` of the failing step (after the batch hook and the inject hook; nothing is drawn or augmented again). For the fp16 pass, a forward hook on every module (names from `named_modules()`) records the first hook call whose output (a tensor, or any tensor in a tuple) holds a non finite value; hooks fire innermost module first, so this names the deepest module. The hooks are removed in a `finally`. On CPU or with amp off the fp16 pass is a float32 pass; that is expected. An OOM or Ctrl+C runs no diagnostics, and `failure` stays null. Steps that GradScaler skips for inf gradients (detected when `scaler.get_scale()` is lower after `scaler.update()` than before) are counted in `scaler_skipped_steps`, which carries across resumes through `last.pt`, and are not treated as failures.
 - **AC-13**: `evaluate.py --run <dir>` scores `best.pt` on the run's `val_cases` at pattern 1 (complete input) only and writes `metrics_val.csv` with exactly n_val × 3 rows (342 for the full run), with Dice, HD95 in mm, sensitivity and precision under the spec 0001 AC-8 empty region rule. No Dice or HD95 value is NaN. It refuses (exit 1) a run whose status is not `ok` or that has no `best.pt`.
 - **AC-14**: `make_table.py --run <dir>` writes `writing/tables/0003-baseline-val.tex`: one row per region WT, TC, ET with Dice mean and median (3 decimals), HD95 mean and median (1 decimal), and two counts as in spec 0002 AC-9: `Both empty` (scored Dice 1, HD95 0) and `One empty` (scored Dice 0, HD95 373.13). The HD95 mean and median include those rule values, as in the tracer. The caption reads `Complete input baseline, validation fold (development), n = <n_val>, seed <seed>, checkpoint at iteration <best_iteration>. Not a test result.`
 - **AC-15**: Determinism: two `--quick` runs with the same seed on CPU give `loss` and `lr` columns in `train_log.csv` that match within 1e-6 at every iteration, and so do two such runs with `num_workers = 2`. A `--seed 43` quick run records seed 43 and a different config hash.
@@ -53,7 +53,7 @@ E1 is a thin experiment folder, `experiments/0003-baseline/`, on top of a reusab
 | Model | MONAI `UNet`, channels (32, 64, 128, 256, 320), strides (2, 2, 2, 2), `num_res_units=2` |
 | Patch | 128^3, batch 1, `RandCropByPosNegLabeld` on `wt`, pos 1, neg 1 (as spec 0001) |
 | Loss | `DiceLoss(sigmoid=True)` + `BCEWithLogitsLoss`, equal weight, float32 (as spec 0001) |
-| Optimiser | AdamW, lr 1e-3, weight decay 1e-5, `GradScaler` |
+| Optimiser | AdamW, lr 1e-3, weight decay 1e-5, `GradScaler`, gradient norm clipped at 12 after unscaling (added 2026-11-03) |
 | LR schedule | linear warmup over 500 iterations from 0, then cosine to 0 at 40,000 (`LambdaLR`, stepped once per iteration) |
 | Budget | 40,000 iterations (about 46 passes over 863 cases) |
 | Augmentation | 3 axis flips, then brain only intensity scale and shift (AC-5) |
@@ -64,7 +64,7 @@ E1 is a thin experiment folder, `experiments/0003-baseline/`, on top of a reusab
 | Postprocessing | none, sigmoid > 0.5 |
 | Inference | spec 0001 settings, roi raised to 128^3 to match the patch |
 | Resume | from `last.pt` at the last val point, logged, guarded (AC-11) |
-| Failures | fail loud, status `failed`, resumable (AC-12) |
+| Failures | fail loud, status `failed`, resumable, with a `failure` diagnostics object for a non finite loss (AC-12) |
 | Memory test | 200 steps + 1 val case, pass below 3,584 MiB |
 | Determinism | spec 0001 settings unchanged. Claim: seeded and logged, not bitwise identical on GPU, and a resumed run is not identical to an unbroken one |
 
@@ -83,7 +83,7 @@ See [rationale.md](rationale.md).
 | `data/processed/0003-baseline/cache.json` | one per cache dir | `preprocess_hash`, `preprocess_version`, `preprocess` (the hashed settings), `git_commit`, `folds`, `n_cases`, `splits_sha256`, `created_utc`, `updated_utc` | read by every E1 script (AC-3) |
 | `results/0003-baseline/<run_id>/run.json` | run_id | the keys below | 1 run : 1 seed : 1 cache |
 | `.../config.toml` | run_id | effective config after `--quick` and `--seed` | 1:1 run |
-| `.../train_log.csv` | (run, iteration) | `iteration, loss, dice_loss, bce_loss, lr, seconds`; on val rows also `val_wt, val_tc, val_et, val_score` | N:1 run |
+| `.../train_log.csv` | (run, iteration) | `iteration, loss, dice_loss, bce_loss, lr, grad_norm, seconds`; on val rows also `val_wt, val_tc, val_et, val_score` | N:1 run |
 | `.../val_log.csv` | (run, iteration, pattern_id, case, region) | `iteration, pattern_id, case, region, dice, gt_empty, pred_empty` | N:1 run, val cases only |
 | `.../checkpoints/best.pt` | run | `model` state dict, `iteration`, `config_hash`, `score` | 1:1 run |
 | `.../checkpoints/last.pt` | run | `best.pt` fields plus `optimizer`, `scheduler`, `scaler`, `best_score`, `best_iteration`, `scaler_skipped_steps`, `hook_rng`, `rng` (torch, cuda, numpy, python) | 1:1 run, overwritten |
@@ -113,6 +113,23 @@ See [rationale.md](rationale.md).
 | `best_score` | float or null | its selection score |
 | `failed_iteration` | int or null | iteration where a failure happened |
 | `resumes` | list of objects | per resume: `from_iteration`, `utc`, `git_commit`, `git_dirty`, `previous_status` |
+| `failure` | object or null | set only on a non finite loss, the keys below; null otherwise (an OOM or Ctrl+C leaves it null). Added last in `RUN_KEYS`. A resume sets it to null explicitly (the resume defaults would otherwise copy the old value). A run folder from before this key existed fails the `RUN_KEYS` check and cannot be resumed; that is accepted (the one such failed run, `20261103-000625-55df892d`, had no `last.pt` anyway) |
+
+**failure keys** (AC-12; every key present, `null` where a step could not run):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `iteration` | int | `it`, same as `failed_iteration` |
+| `cases` | list of str | `batch["case"]` |
+| `n_nonfinite_input` | int | non finite values in the `x` fed to the model (after the batch hook and the inject hook) |
+| `n_nonfinite_logits` | int | non finite values in the float32 logits of the original pass |
+| `max_abs_finite_logit` | float or null | max of `abs(logits[isfinite(logits)])`; null if none is finite |
+| `dice_loss`, `bce_loss` | float or str | `float()` of each term; a nan or inf is stored as the string `"nan"`, `"inf"` or `"-inf"`, so `run.json` stays valid JSON |
+| `params_finite` | bool | `torch.isfinite(p).all()` for every `p` in `model.parameters()` |
+| `grad_scale` | float or null | `scaler.get_scale()` at the failing step (no `update()` has run in it); null when the scaler is off |
+| `first_nonfinite_module` | str or null | name (from `named_modules()`) of the first module whose output holds a non finite value in the repeat fp16 pass; null if none |
+| `fp32_loss_finite` | bool or null | loss of the same batch in float32 with no autocast is finite |
+| `diagnostic_error` | str or null | error text if the repeat passes raised |
 
 **State transitions** (`run.json` status): `running` → `ok` | `failed` | `interrupted`. `failed` | `interrupted` | `running` (dead process) → `running` through `--resume`. `ok` is final. A folder with status `running` and no live `train.pid` process is a crashed run. `check_baseline.py` fails it, and `--resume` may continue it.
 
@@ -141,6 +158,7 @@ num_workers = 4
 lr = 1e-3
 weight_decay = 1e-5
 amp = true
+grad_clip = 12.0
 flip_p = 0.5
 intensity_scale = 0.1
 intensity_shift = 0.1
@@ -194,6 +212,8 @@ Test hook (as in the tracer): `BASELINE_INJECT_INF=<iteration>` makes `train.py`
 | preprocess | per file `sha256` | sha256 of the written `.npz` |
 | CachedCase | WT, TC, ET masks | `label_to_regions()` on the cached raw label |
 | train | lr per step | `[train] lr, warmup, iterations` through the warmup and cosine lambda |
+| train | `grad_norm` | return value of `clip_grad_norm_()` on the unscaled gradients, max norm `[train] grad_clip` |
+| train | `failure` diagnostics | the failing batch and model in memory at that step; the repeat passes reuse the same batch tensor, with `torch.no_grad()` |
 | train | loss start and end means | `train_log.csv` `loss`, W = 50 (min(50, iterations // 2) in quick) |
 | train | selection score | `val_log.csv` Dice: mean over cases per region, then mean of the 3 regions |
 | train | `best_iteration`, `best_score` | the val point with the highest score, a tie keeps the earlier one |
@@ -233,11 +253,16 @@ Test hook (as in the tracer): `BASELINE_INJECT_INF=<iteration>` makes `train.py`
 - Laptop sleep or power loss: status stays `running`. `--resume` continues from the last val point, and at most 4,000 iterations are redone.
 - OOM during val on a large case: same path as a training OOM (AC-12), so the memory test checks the largest val case first.
 - An empty region in a val case: the spec 0001 AC-8 rule (both empty is Dice 1) is used in the selection score unchanged.
+- A non finite loss on clean input (seen 2026-11-03, Kaggle T4, run `20261103-000625-55df892d`: loss healthy and falling up to iteration 668, then non finite at 669, 169 iterations after warmup reached lr 1e-3; the case, BraTS-GLI-00195-000, has every channel within −3.3 to 6.2 after preprocessing). The likely cause is fp16 overflow after a large update, not proven. Clipping (AC-7) limits the update, and the `failure` object (AC-12) tells the next failure's cause apart: input, fp16 only (`fp32_loss_finite` true), or the weights (`params_finite` false).
+- Clipping also runs inside `memory_test.py` and `gpu_bench.py` (both call `Trainer.step()` and read only `seconds`), so they need `grad_clip` in the config. The earlier 0.260 s/iter was measured without clipping; the cost is one more GPU sync per step (expected negligible, not measured). `grad_clip` is outside `[preprocess]`, so the cache hash and cache stay valid; only `config_hash` changes.
+- No `last.pt` before iteration 4,000, so a failure earlier than that cannot be resumed; the run starts again (about 25 minutes of caching plus the lost steps on Kaggle).
 
 **Critical test scenarios**:
 - Happy path: synthetic NIfTI cases in `tmp_path`, `preprocess.py --quick`, then `train.py --quick --device cpu`, `evaluate.py`, `make_table.py` give status `ok`, a 1 × 3 row `metrics_val.csv` and the table, verifies **AC-1**, **AC-2**, **AC-7**, **AC-8**, **AC-10**, **AC-13**, **AC-14**.
 - Determinism: two quick runs, same seed, same `loss` column, verifies **AC-15**.
 - Failure case: `BASELINE_INJECT_INF=7` gives `failed` and exit 1. Then, with the variable unset, `--resume` restores iteration 5 and finishes `ok` with 10 log rows, verifies **AC-11**, **AC-12**.
+- Failure diagnostics: the same injected run has `failure` with every key, `cases` equal to the batch case, `n_nonfinite_input` above 0, `params_finite` true, and a reason ending `in <case>`; after the resume `failure` is null, verifies **AC-12**.
+- Clipping: a quick CPU run has a finite `grad_norm` on every row; a unit test with `grad_clip` set tiny shows the total gradient norm after the clip is at most `grad_clip` (plus 1e-6), and `grad_clip = 0` is rejected with exit 2, verifies **AC-7**.
 - Interrupted writes: a fake run with `best.pt` at iteration 10 and `last.pt` at 5 resumes with `best.pt` deleted and the best score from `last.pt`, verifies **AC-11**.
 - Guard: a changed `clip_high_pct` gives exit 2 before training; a resume after editing the run's `config.toml` gives exit 2, verifies **AC-3**, **AC-11**.
 - Leakage: a mini `splits.csv` with a `test` row is never cached or loaded, verifies **AC-4**.
@@ -254,6 +279,7 @@ Ordered by Tracer Bullet: a thin quick thread through cache, loop, val, evaluati
 5. Checks: `memory_test.py`, `check_baseline.py`, the determinism and seed tests, satisfies **AC-6**, **AC-9**, **AC-15**, **AC-16**
 6. Docs: E1 row in `experiments/AGENTS.md`, `docs/whats-built.md`, `context/progress-tracker.md`, satisfies **AC-18**
 7. Human runs, in order (the AI prints the commands and does not wait): `preprocess.py` (train, val), `preprocess.py --verify`, `memory_test.py`, then if it passes `train.py`, `evaluate.py`, `make_table.py`, `check_baseline.py`, and the human pastes the last two lines of each, satisfies **AC-2**, **AC-6**, **AC-7**, **AC-8**, **AC-9**, **AC-13**, **AC-16**. If the memory test fails or projects more than 10 hours, stop and return to `/architect`; do not shrink the model by hand.
+8. Stability fix (added 2026-11-03, after step 7 failed at iteration 669 on Kaggle): `grad_clip` in config and `check_config()`, unscale then clip in `Trainer.step()`, the `grad_norm` column, the `failure` key and its diagnostics, the tests in *Critical test scenarios*, the docs. Then the human reruns step 7 on Kaggle from a fresh session (new config hash, so a new run folder; the failed run folder stays as a record), satisfies **AC-7**, **AC-10**, **AC-12**, **AC-18**. If it fails again, read `failure`: `fp32_loss_finite` true points to fp16, and the next decision (amp off, about 2 to 3 times slower, estimated) goes back to `/architect`; do not change lr or amp by hand.
 
 ## Consequences
 
@@ -269,6 +295,8 @@ Ordered by Tracer Bullet: a thin quick thread through cache, loop, val, evaluati
 - Resume makes a run seeded and logged, not identical to an unbroken run. Two runs of the same seed with different crash histories may differ slightly.
 - One seed is only a weak basis for variance. Seed claims wait for seeds 43 and 44.
 - Selection on complete input favours complete input. E3 and E4 must decide whether they select the same way, and that is a fairness decision for their spec.
+- Clipping at 12 was chosen from practice, not tuned, and the cause of the first failure is not proven. Clipping changes the E1 config hash, and E3 and E4 inherit it through `common/training.py`, so the comparison stays paired.
+- The first full run (2026-11-03) cost about 33 minutes of Kaggle GPU time with no result.
 
 **Neutral**:
 - `common/training.py` becomes the most load bearing shared module and needs careful review before E3.
@@ -280,4 +308,6 @@ Ordered by Tracer Bullet: a thin quick thread through cache, loop, val, evaluati
 - [ ] E3 and E4 spec: decide whether their checkpoint selection stays at complete input (this spec's rule) or averages over patterns through `val_patterns`, and record it before training. No change to `common/` is needed for either choice.
 - [ ] Seeds 43 and 44 after E2 if GPU time allows.
 - [ ] Feature 0: view the 4 flagged FLAIR cases. If they are fine, set `exclude_flair_flag = false` and record the new config hash.
+- [ ] Verify the nnU-Net gradient clipping value (12) against `isensee2021` and write its note in `docs/literature/` before the thesis says where the value comes from; until then the text carries `[CITE?]`.
+- [ ] After the rerun, record in this spec whether `grad_norm` ever reached the clip (how often clipping was active) and what the old failure's cause most likely was.
 - [ ] `select_subjects()` in `common/data.py` notes "revisit when sizing E1". E1 uses `fold_cases()` instead, and `select_subjects()` stays for the tracer only.
