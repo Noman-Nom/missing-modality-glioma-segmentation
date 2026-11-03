@@ -3,7 +3,8 @@
     uv run python experiments/0003-baseline/gpu_bench.py              # 60 steps at the E1 patch
     uv run python experiments/0003-baseline/gpu_bench.py --steps 20   # shorter
 Builds the E1 model from config.toml and runs the real training step (common.training.Trainer
-.step: autocast, GradScaler, Dice plus BCE, AdamW, warmup and cosine lr) on random 4 x 128^3
+.step: float32 since spec 0003 step 9, or autocast and GradScaler when [train] amp is true;
+Dice plus BCE, AdamW, clipping, warmup and cosine lr) on random 4 x 128^3
 batches, so only the data is fake. Prints the GPU, driver, CUDA, s/iter over the steps after
 the first 10, peak VRAM and the projected training hours for [train] iterations (training only:
 no val, no data loading). Not a result, a hardware check. Writes nothing.
