@@ -13,6 +13,7 @@ Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy, pandas. 4 GB GPU: patch trainin
 - `common/seed.py` one function that sets all seeds
 - `common/model.py` the compact 3D U-Net and sliding window prediction
 - `common/runlog.py` config loading, config hash, git and version info, `run.json`
+- `common/training.py` the shared training loop, val, checkpoints, resume and failure handling; E3 and E4 reuse it through `batch_hook` and `val_patterns`. At a val point the `train_log.csv` row is flushed before `last.pt`, so every `last.pt` stays resumable
 - `NNNN-name/config.toml` one config per experiment
 
 ## Commands
