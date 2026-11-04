@@ -82,7 +82,7 @@ The benchmark shows the same environment, the same losses and the same memory, w
 
 - [ ] Record the Kaggle GPU quota and session limit in this ADR.
 - [ ] Add the driver version to `run.json` (AC-5) through a spec change; until then the KAGGLE.md GPU check cell prints it for the notes.
-- [ ] First E1 run on Kaggle passes the checks (AC-3, AC-4); then mark this ADR fully done.
+- [ ] First E1 run on Kaggle passes the checks (AC-3, AC-4); then mark this ADR fully done. AC-4 passed 2026-11-03: run `20261103-023817-f9b3afb6`, in float32 (spec 0003 step 9), 0.600 s/iter on real data, 7.4 h of training and val, about 8.2 h for the whole notebook. This replaces the fp16 benchmark's 2.2 h as the planning number. AC-3 is still to confirm.
 - [ ] Confirm the BraTS 2023 terms allow a private copy on Kaggle; record it in `data/DATA.md`.
 
 ## References

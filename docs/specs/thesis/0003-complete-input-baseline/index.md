@@ -327,5 +327,6 @@ Ordered by Tracer Bullet: a thin quick thread through cache, loop, val, evaluati
 - [ ] Feature 0: view the 4 flagged FLAIR cases. If they are fine, set `exclude_flair_flag = false` and record the new config hash.
 - [ ] Verify the nnU-Net gradient clipping value (12) against `isensee2021` and write its note in `docs/literature/` before the thesis says where the value comes from; until then the text carries `[CITE?]`.
 - [x] After the rerun, record whether `grad_norm` ever reached the clip and the old failure's cause: it never did (max 3.08 in 668 steps), and the cause was fp16 activation overflow in the decoder (edge cases, rationale *Revision 2*).
-- [ ] After the float32 run, record the measured s/iter and wall time here and in ADR 0002, and whether seeds 43 and 44 still fit the weekly quota.
+- [x] After the float32 run, record the measured s/iter and wall time here and in ADR 0002: 0.600 s/iter (the estimate of 0.35 to 0.5 was too low), 7.4 h of training and val, about 8.2 h for the whole notebook, peak reserved 1,136 MiB (the estimate of about 2 GB was too high), run `20261103-023817-f9b3afb6`. `grad_norm` passed the clip on 3 of 40,000 steps.
+- [ ] Check whether seeds 43 and 44 fit the weekly Kaggle quota, at about 8.2 h a run. The quota is not recorded yet (ADR 0002 follow-up).
 - [ ] `select_subjects()` in `common/data.py` notes "revisit when sizing E1". E1 uses `fold_cases()` instead, and `select_subjects()` stays for the tracer only.
