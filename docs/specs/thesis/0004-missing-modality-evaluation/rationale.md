@@ -64,6 +64,31 @@ Milestone 3 found two contradictions in this spec. AC-12 said `analyse.py` reads
 
 One small limit stays. The verdict uses unrounded p values, while the star reads `%.6g` from `stats.csv`. A p value within about 0.00000005 below alpha could be significant in the verdict and unstarred in the table. This is left as it is, because the verdict is the rule and the star is display.
 
+### Spec update 2026-11-04: fixes from `/check review`
+
+The review (`docs/reviews/2026-11-04-feat-e2-missing-eval.md`) found four points that the spec pinned, so the build could not change them alone. None of them touches the statistics, and no E2 number existed when they were decided.
+
+**Resume keys (AC-5).**
+- **Chosen: add `device` and `gpu`.** AC-9 trusts the `gpu` field, and a resume rebuilt the record from the first session, so a second machine could hide behind it.
+- Log each session's `gpu` in `resumes` and fail `check_rules()`: the sweep would spend a whole session before anyone learnt the run could never pass.
+- `seed` and `splits_sha256`, which the review also named, add nothing. `seed` is inside `config_hash`, and `splits.csv` is tracked, so `git_commit` pins it.
+
+**Star (AC-14).**
+- **Chosen: keep the two sided star, and say so in the caption.** It stays a direct reading of `p_holm`, and a clear improvement stays visible.
+- Star only if worse: matches the H1a reading, but hides a real result, and a table would no longer match `stats.csv`. The HD95 table prints no difference, so its reader needs the caption either way.
+
+**`make_table.py` guards (AC-14).** This reverses the note above that `make_table.py` needs no status check of its own. That note counted on the analysis CSVs existing only at status `ok`, but it left the case of a folder analysed and later resumed, and a table with a new run's caption on old CSVs is the worst way to fail. Three lines close it, with the same rule as `analyse.py`. Calling `check_rules()` instead was rejected for the same reason as before: it refuses quick runs and needs the E1 run.
+
+**Sealing inference (AC-20).** A change to `predict()` after the val run passed the gate, because the AC-9 tie out compares stored files and scores nothing.
+- **Chosen: hash the source text of a named list, plus the values of `MODALITIES`, `REGIONS` and `REGION_LABELS`.** A few lines, no file moves, and `build_model()` stays free for E4. The cross check found that `predict`, `CachedCase` and `label_to_regions` alone still left the load path and the constants open: editing `REGION_LABELS` would shift the ground truth with the hash unchanged.
+- Hash all of `model.py` and `data.py`, with E4's builder in a new file: no leaks and less code, but any edit to `data.py`, E3's training transforms included, would force an E1 val rerun. Runner up.
+- Move `predict()` to its own file: the hash stays pure file bytes, but E1's imports change, and `CachedCase` stays open unless it moves too.
+- Git diff at the gate: needs full history on Kaggle, and refuses E4's legitimate change to `build_model()`.
+- Rescoring a few val cases at the gate: the strongest check, since it also catches library drift, but the gate would need a GPU and the val cache, and AC-7 runs before any GPU work.
+- Note it in Consequences only: leaves the gap open in the one place the study can least afford it.
+
+**Cross check of this update (2026-11-04, `sonnet`).** It raised six gaps, all closed in the spec. One recommendation was not taken: checking `n` in `friedman.csv`, because `make_table.py` never reads that file. A label or length prefix per hashed part was also left out, because the file bytes before them have no separators either.
+
 ## Rationale
 
 The test fold is the scarcest resource in the study, so the design protects it at every step: val is the rehearsal, the code gate is the lock, and `protocol_hash` is the evidence that rehearsal and real run used the same rules. This costs a delay in the RQ1 table, which is a fair price given that RQ2 is the main contribution and depends on a clean comparison.

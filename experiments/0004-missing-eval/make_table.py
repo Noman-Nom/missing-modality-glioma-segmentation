@@ -3,8 +3,9 @@
     uv run python experiments/0004-missing-eval/make_table.py --eval <eval dir>
 Writes 0004-missing-eval-<fold>-dice.tex, -hd95.tex, -marginal.tex and -heatmap.tex. No number is
 typed by hand. Reads only the analysis CSVs, run.json, and alpha from config.toml in the eval folder
-(the value analyse.py uses for the verdict). Exit 1 if an analysis CSV is missing or has the wrong
-row count. The four files compile through writing/tracer/e2-preview.tex.
+(the value analyse.py uses for the verdict). Exit 1, writing nothing, unless run.json is there, its
+status is ok, both analysis CSVs are there with their row counts and every n in stats.csv equals
+n_cases, checked in that order. The four files compile through writing/tracer/e2-preview.tex.
 """
 import argparse
 import csv
@@ -29,6 +30,24 @@ DECIMALS = {"dice": 3, "hd95_mm": 1}
 STAR = "$^{*}$"
 NODE_LABEL = (r"  nodes near coords={\pgfmathprintnumber[fixed,fixed zerofill,precision=3]"
               r"{\pgfplotspointmeta}},")
+
+
+def finished_run(eval_dir):
+    """run.json of a finished sweep, checked before any CSV is read (AC-14)."""
+    if not (Path(eval_dir) / "run.json").is_file():
+        raise SystemExit(f"ERROR: {Path(eval_dir) / 'run.json'} missing")
+    rec = load_run(eval_dir)
+    if rec.get("status") != "ok":
+        raise SystemExit(f"ERROR: eval status is {rec.get('status')!r}, expected 'ok'")
+    return rec
+
+
+def check_n(stats, rec):
+    """Every n in stats.csv equals n_cases. marginal.csv has no n, so only its row count counts."""
+    n_cases = rec.get("n_cases")
+    wrong = sorted({r["n"] for r in stats.values() if int(r["n"]) != n_cases})
+    if wrong:
+        raise SystemExit(f"ERROR: n {wrong} in stats.csv, expected n_cases {n_cases}")
 
 
 def read_rows(path, keys, expected):
@@ -83,18 +102,24 @@ def provenance(rec):
             f"% config {rec['config_hash']}, git {rec['git_commit']}, seed {rec['seed']}. Do not edit."]
 
 
-def caption(what, n, rec):
+def star_note(alpha):
+    """What a star means, for the two tables that carry one. The test is two sided, so the
+    direction comes from mean_diff (AC-14)."""
+    return f"Star: Holm adjusted two sided p below {alpha:g} against pattern 1, in either direction. "
+
+
+def caption(what, n, rec, note=""):
     return (rf"\caption{{{what}, {rec['fold']} fold, n = {n}, seed {rec['seed']}. "
-            rf"{NOTE[rec['fold']]}}}")
+            rf"{note}{NOTE[rec['fold']]}}}")
 
 
-def table(rec, n, what, name, columns, head, rows):
+def table(rec, n, what, name, columns, head, rows, note=""):
     """The shared booktabs layout. head and rows are lists of finished LaTeX lines."""
     return "\n".join([
         *provenance(rec),
         r"\begin{table}[htbp]",
         r"\centering",
-        caption(what, n, rec),
+        caption(what, n, rec, note),
         rf"\label{{tab:missing-eval-{rec['fold']}-{name}}}",
         r"\resizebox{\linewidth}{!}{%",
         rf"\begin{{tabular}}{{{columns}}}",
@@ -123,7 +148,7 @@ def pattern_table(stats, rec, alpha, metric, what, name, sub, cells):
         rows.append(" & ".join([str(p), pattern.name, *filled]) + r" \\")
     return table(rec, stats[metric, REGIONS[0], 1]["n"], what, name,
                  "rl" + "r" * len(sub) * len(REGIONS), region_head(len(sub), ["ID", "Present"], sub),
-                 rows)
+                 rows, star_note(alpha))
 
 
 def dice_table(stats, rec, alpha):
@@ -198,9 +223,10 @@ def main(argv=None):
     ap.add_argument("--eval", required=True, type=Path)
     ap.add_argument("--out-dir", type=Path, default=OUT)
     a = ap.parse_args(argv)
-    rec = load_run(a.eval)
+    rec = finished_run(a.eval)
     alpha = load_config(a.eval / "config.toml")["eval"]["alpha"]
     stats, marginal = read_stats(a.eval), read_marginal(a.eval)
+    check_n(stats, rec)
     files = {"dice": dice_table(stats, rec, alpha), "hd95": hd95_table(stats, rec, alpha),
              "marginal": marginal_table(marginal, stats, rec), "heatmap": heatmap(stats, rec)}
     a.out_dir.mkdir(parents=True, exist_ok=True)

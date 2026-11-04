@@ -6,6 +6,7 @@ rule, resume, the test gate and check_rules live here too (AC-5, AC-6, AC-7, AC-
 """
 import csv
 import hashlib
+import inspect
 import math
 import os
 import statistics
@@ -15,19 +16,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from common.cache import cache_dir, repo_path
-from common.data import REGIONS, cached_eval_transforms, cached_items, fold_cases, subject_of
+from common.data import (
+    MODALITIES,
+    REGION_LABELS,
+    REGIONS,
+    CachedCase,
+    cached_eval_transforms,
+    cached_items,
+    fold_cases,
+    label_to_regions,
+    subject_of,
+)
 from common.metrics import region_metrics
 from common.missing import PATTERNS, apply_pattern
 from common.model import predict
 from common.runlog import load_config, load_run
 
 REPO = Path(__file__).resolve().parents[2]
-# order matters; model.py is left out on purpose, E4 changes the input channels (spec 0004)
+# order matters; whole model.py and data.py are left out on purpose, E4 changes the input channels
+# in build_model() and E3 may add training transforms, so PROTOCOL_SOURCES seals only what a case
+# passes through at scoring time (spec 0004, AC-20)
 PROTOCOL_FILES = (
     "experiments/0004-missing-eval/config.toml", "experiments/0004-missing-eval/analyse.py",
     "experiments/common/evaluation.py", "experiments/common/metrics.py",
     "experiments/common/missing.py", "experiments/common/stats.py",
 )
+PROTOCOL_SOURCES = (predict, cached_items, cached_eval_transforms, CachedCase, label_to_regions)
 METRIC_COLUMNS = ["eval_id", "case", "subject", "pattern_id", "pattern_name", "region", "dice",
                   "hd95_mm", "sensitivity", "precision", "gt_empty", "pred_empty"]
 # every key is present in every eval run.json (null where not yet known); spec 0004, Data model
@@ -40,7 +54,7 @@ EVAL_RUN_KEYS = (
 )
 # a resume stops if any of these differs from run.json (AC-5); paths are not here, Kaggle moves them
 RESUME_KEYS = ("git_commit", "config_hash", "protocol_hash", "source_run_id",
-               "source_config_hash", "source_best_iteration")
+               "source_config_hash", "source_best_iteration", "device", "gpu")
 MAX_MEAN_DICE_DIFF = 0.001  # AC-9, per region
 MAX_CASE_DICE_DIFF = 0.01  # AC-9, per (case, region)
 
@@ -77,10 +91,15 @@ def eval_cases(cfg, eval_cfg, rec, fold):
 
 
 def protocol_hash():
-    """sha256 over the bytes of PROTOCOL_FILES, in order."""
+    """sha256 over the bytes of PROTOCOL_FILES, then the source text of PROTOCOL_SOURCES, then the
+    region and modality constants, in that order. A source that cannot be read raises: a skipped
+    source would seal less than the record says (AC-20)."""
     h = hashlib.sha256()
     for name in PROTOCOL_FILES:
         h.update((REPO / name).read_bytes())
+    for source in PROTOCOL_SOURCES:
+        h.update(inspect.getsource(source).encode("utf-8"))
+    h.update(repr((MODALITIES, REGIONS, REGION_LABELS)).encode("utf-8"))
     return h.hexdigest()
 
 

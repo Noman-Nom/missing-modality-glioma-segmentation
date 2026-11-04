@@ -129,9 +129,9 @@ shutil.copytree(OLD, EVAL)
 
 4. Run cells 4 and 5 as they are. The same `evaluate.py` command resumes: it cuts `metrics.csv` back to its last whole pair, skips the finished pairs, and adds an entry to `resumes` in `run.json`.
 
-A resume stops with exit 2 if the commit, the config, `protocol_hash` or the source run differs. A finished folder is refused too, and needs `--rerun-reason "<text>"` to be replaced.
+A resume stops with exit 2 if the commit, the config, `protocol_hash`, the source run, the `device` or the `gpu` differs, so one `metrics.csv` never mixes two machines. A finished folder is refused too, and needs `--rerun-reason "<text>"` to be replaced.
 
-Known gap (flagged for `/architect`): `--rerun-reason` works only on a finished folder. A failed or running folder from an older commit cannot resume, so today it has to be moved aside by hand. Never delete it.
+If a resume stops because the session got another accelerator, you have two ways out. You could set the accelerator back to the T4 and run again, which keeps every finished pair. Or you could move the folder aside by hand and start clean, because `--rerun-reason` works only on a finished folder. The same goes for a failed or running folder from an older commit. Never delete a folder.
 
 ## Later: the test run (feature 7, do not run now)
 

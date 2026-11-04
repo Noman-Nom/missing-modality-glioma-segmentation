@@ -1,20 +1,22 @@
 """Spec 0004 on a real synthetic E1 run: guards, the quick sweep, analyse, the tables,
 determinism, the run record, the folder rule, resume, the test gate and check_rules (AC-1, AC-2,
-AC-3, AC-5, AC-6, AC-7, AC-9, AC-10, AC-12, AC-13, AC-14, AC-15, AC-16). CPU only, no real data."""
+AC-3, AC-5, AC-6, AC-7, AC-9, AC-10, AC-12, AC-13, AC-14, AC-15, AC-16, AC-20). CPU only, no real data."""
 import csv
 import hashlib
 import importlib.util
+import inspect
 import json
 import shutil
 from pathlib import Path
 
 import pytest
 import torch
-from common.data import MODALITIES, REGIONS
+from common.data import MODALITIES, REGION_LABELS, REGIONS
 from common.evaluation import (
     EVAL_RUN_KEYS,
     METRIC_COLUMNS,
     PROTOCOL_FILES,
+    PROTOCOL_SOURCES,
     check_rules,
     protocol_hash,
 )
@@ -565,6 +567,14 @@ def test_each_table_carries_its_provenance_and_val_note(tables, quick_eval, name
             "complete input, so pattern 1 is slightly optimistic.") in tex
 
 
+# covers: AC-14. The line sits right after the n, seed and fold sentence, on the two starred tables.
+@pytest.mark.parametrize("name", TABLE_NAMES)
+def test_star_line_is_on_the_starred_tables_only(tables, name):
+    line = "Star: Holm adjusted two sided p below 0.05 against pattern 1, in either direction."
+    assert ("seed 42. " + line + " Development fold" in tables[name]) == (name in ("dice", "hd95"))
+    assert (line in tables[name]) == (name in ("dice", "hd95"))
+
+
 # covers: AC-14
 @pytest.mark.parametrize(("name", "rows"), [("dice", 15), ("hd95", 15), ("marginal", 8)])
 def test_tables_have_the_spec_layout(tables, name, rows):
@@ -612,6 +622,7 @@ def test_table_star_follows_alpha_in_the_eval_folder_config(tmp_path, alpha, sta
     assert make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)]) == 0
     tex = (tmp_path / "0004-missing-eval-val-dice.tex").read_text()
     assert (make_table.STAR in tex) == starred
+    assert f"p below {alpha:g} against pattern 1" in tex
 
 
 # covers: AC-14. HD95 leads with the median, 1 decimal, and pattern 1 has no star.
@@ -680,6 +691,66 @@ def test_tables_refuse_a_missing_csv(quick_eval, tmp_path, name):
     with pytest.raises(SystemExit, match="missing"):
         make_table.main(["--eval", str(tmp_path / "ev"), "--out-dir", str(tmp_path)])
 
+def drop_key(key):
+    def change(folder):
+        rec = load_run(folder)
+        del rec[key]
+        (folder / "run.json").write_text(json.dumps(rec))
+    return change
+
+
+def set_key(**fields):
+    return lambda folder: edit_json(folder, **fields)
+
+
+def drop_last_line(path):
+    path.write_text("".join(path.read_text().splitlines(keepends=True)[:-1]))
+
+
+def set_last_n(rows):
+    rows[-1]["n"] = "1"
+
+
+# covers: AC-14. Each check through main, against an older table that must stay byte equal.
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda f: (f / "run.json").unlink(), "run.json missing"),
+    (set_key(status="failed"), "status is 'failed'"),
+    (set_key(status="running"), "status is 'running'"),
+    (set_key(status=None), "status is None"),
+    (drop_key("status"), "status is None"),
+    (lambda f: (f / "stats.csv").unlink(), "stats.csv missing"),
+    (lambda f: (f / "marginal.csv").unlink(), "marginal.csv missing"),
+    (lambda f: drop_last_line(f / "stats.csv"), "89 rows in stats.csv"),
+    (lambda f: drop_last_line(f / "marginal.csv"), "23 rows in marginal.csv"),
+    (lambda f: edit_csv(f / "stats.csv", set_last_n), r"n \['1'\] in stats.csv"),
+    (set_key(n_cases=3), "expected n_cases 3"),
+    (set_key(n_cases=None), "expected n_cases None"),
+    (drop_key("n_cases"), "expected n_cases None"),
+])
+def test_table_refusal_leaves_older_tables_untouched(quick_eval, tmp_path, change, message):
+    ev, out = tmp_path / "ev", tmp_path / "out"
+    shutil.copytree(quick_eval, ev)
+    assert make_table.main(["--eval", str(ev), "--out-dir", str(out)]) == 0
+    before = {p: p.read_bytes() for p in out.iterdir()}
+    change(ev)
+    with pytest.raises(SystemExit, match=message):
+        make_table.main(["--eval", str(ev), "--out-dir", str(out)])
+    assert {p: p.read_bytes() for p in out.iterdir()} == before
+
+
+# covers: AC-14. The order of the spec: status before any CSV, row count before n.
+def test_table_checks_run_in_the_spec_order(quick_eval, tmp_path):
+    ev = tmp_path / "ev"
+    shutil.copytree(quick_eval, ev)
+    (ev / "marginal.csv").unlink()
+    edit_json(ev, n_cases=3)
+    with pytest.raises(SystemExit, match="marginal.csv missing"):
+        make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)])
+    edit_json(ev, status="failed")
+    with pytest.raises(SystemExit, match="status is 'failed'"):
+        make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)])
+
+
 @pytest.fixture(scope="module")
 def val_eval(e1_run, tmp_path_factory):
     """A finished non quick val eval (3 cases), as the test gate expects it."""
@@ -713,10 +784,76 @@ def copy_quick(quick_eval, tmp_path):
 def test_protocol_hash_is_the_files_in_the_spec_order(quick_eval):
     assert [Path(f).name for f in PROTOCOL_FILES] == [
         "config.toml", "analyse.py", "evaluation.py", "metrics.py", "missing.py", "stats.py"]
+    assert [s.__name__ for s in PROTOCOL_SOURCES] == [
+        "predict", "cached_items", "cached_eval_transforms", "CachedCase", "label_to_regions"]
     h = hashlib.sha256()
     for name in PROTOCOL_FILES:
         h.update((REPO / name).read_bytes())
+    for source in PROTOCOL_SOURCES:
+        h.update(inspect.getsource(source).encode("utf-8"))
+    h.update(repr((MODALITIES, REGIONS, REGION_LABELS)).encode("utf-8"))
     assert h.hexdigest() == protocol_hash() == load_run(quick_eval)["protocol_hash"]
+
+
+def edited_model(tmp_path, old, new):
+    """A copy of common/model.py with one edit, imported from a scratch folder."""
+    path = tmp_path / "edited_model.py"
+    text = (REPO / "experiments/common/model.py").read_text()
+    assert old in text
+    path.write_text(text.replace(old, new, 1))
+    spec = importlib.util.spec_from_file_location("edited_model", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# covers: AC-20
+@pytest.mark.parametrize("index", range(len(PROTOCOL_SOURCES)))
+def test_each_protocol_source_is_in_the_hash(monkeypatch, index):
+    def stand_in():
+        pass
+
+    before = protocol_hash()
+    monkeypatch.setattr("common.evaluation.PROTOCOL_SOURCES", (
+        *PROTOCOL_SOURCES[:index], stand_in, *PROTOCOL_SOURCES[index + 1:]))
+    assert protocol_hash() != before
+
+
+# covers: AC-20
+@pytest.mark.parametrize(("name", "value"), [
+    ("MODALITIES", ("T1", "T1ce", "FLAIR", "T2")),
+    ("REGIONS", ("WT", "ET", "TC")),
+    ("REGION_LABELS", {"WT": (1, 2, 3), "TC": (1, 3), "ET": (2,)}),
+])
+def test_each_protocol_constant_is_in_the_hash(monkeypatch, name, value):
+    before = protocol_hash()
+    monkeypatch.setattr(f"common.evaluation.{name}", value)
+    assert protocol_hash() != before
+
+
+# covers: AC-20. Real source text through a copy of model.py: predict is sealed, build_model is
+# free for E4, and the decorator does not leave only a wrapper hashed.
+def test_the_seal_covers_predict_and_leaves_build_model_free(tmp_path, monkeypatch):
+    assert "sliding_window_inference" in inspect.getsource(PROTOCOL_SOURCES[0])
+    before = protocol_hash()
+    rest = PROTOCOL_SOURCES[1:]
+    free = edited_model(tmp_path, "def build_model(cfg):", "def build_model(cfg, extra=0):")
+    monkeypatch.setattr("common.evaluation.PROTOCOL_SOURCES", (free.predict, *rest))
+    assert protocol_hash() == before
+    sealed = edited_model(tmp_path, "def predict(model, image, cfg, device):",
+                          "def predict(model, image, cfg, device):\n    # a comment counts")
+    monkeypatch.setattr("common.evaluation.PROTOCOL_SOURCES", (sealed.predict, *rest))
+    assert protocol_hash() != before
+
+
+# covers: AC-20. len has no Python source: the exception stops the run, nothing is skipped.
+def test_an_unreadable_source_stops_the_run(e1_run, tmp_path, monkeypatch):
+    monkeypatch.setattr("common.evaluation.PROTOCOL_SOURCES", (len,))
+    with pytest.raises(TypeError):
+        protocol_hash()
+    with pytest.raises(TypeError):
+        run_eval(e1_run, tmp_path, "--quick")
+    assert not (tmp_path / f"{e1_run.name}-val-quick").exists()
 
 
 def test_a_finished_record_holds_timings_and_no_rerun_fields(quick_eval):
@@ -882,7 +1019,7 @@ def test_resume_with_every_pair_done_only_finishes(e1_run, quick_eval, tmp_path)
 
 
 @pytest.mark.parametrize("key", ["git_commit", "config_hash", "protocol_hash", "source_run_id",
-                                 "source_config_hash", "source_best_iteration"])
+                                 "source_config_hash", "source_best_iteration", "device", "gpu"])
 def test_resume_mismatch_is_refused_before_any_cut(e1_run, tmp_path, monkeypatch, key, capsys):
     folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
     edit_json(folder, **{key: "other"})

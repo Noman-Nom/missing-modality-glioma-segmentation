@@ -22,6 +22,9 @@ Expected: all pass, `slow` deselected, ruff clean. Tests live in `tests/test_com
 | AC-7 | One test per refused condition (including `git_dirty` of `None` and a changed `protocol_hash`), each proving no `.npz` was opened; one passing path with `git_info` patched |
 | AC-9, AC-16 | Toy eval folders, one rule broken at a time: GPU differs, mean off by 0.002, one case off by 0.02, each refused; the projected hours printed on val |
 | AC-16 | A finished synthetic test eval with `metrics.csv` and `n_cases` both cut to one case: `check_rules` reports `case set differs from the test fold`, and a test subject shared with train is reported, not raised (`test_gate_open_scores_the_synthetic_test_fold_once`) |
+| AC-5 | A resume with a different `device` or `gpu` stops with exit 2 and cuts nothing (`test_resume_mismatch_is_refused_before_any_cut`) |
+| AC-14 | `make_table.py` refuses a missing `run.json`, a status that is not `ok`, and an `n` that differs from `n_cases`, each exit 1 with any older `.tex` byte equal; the Dice and HD95 captions carry the star line with the config `alpha` |
+| AC-20 | `protocol_hash` changes when any entry of `PROTOCOL_SOURCES` or `REGION_LABELS` changes, and stays when `build_model` changes; the hashed text of `predict` contains `sliding_window_inference` |
 | AC-10 | Exact `run.json` key set; an injected exception gives `failed` and a `reason` |
 | AC-11 | Toy cases with known answers, including fully tied Friedman rows giving statistic 0, p 1, W 0 |
 | AC-12 | Row counts (90, 18, 24), a missing row refused, two runs byte identical; a toy case where `marginal.csv` gives a known matched pair answer; refused with exit 1 and no output file: `run.json` missing, each status that is not `ok`, `status` or `n_cases` absent or null, a sweep stopped between two cases, and fewer cases than `n_cases` under status `ok`; a refusal leaves an older output file byte equal; a quick run with status `ok` accepted |

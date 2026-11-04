@@ -130,7 +130,7 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
   - [x] Full statistics and outputs: HD95, Friedman, marginal, bootstrap, verdict, tables, heatmap, `check_eval.py` with the tie out (AC-9, AC-11, AC-12, AC-13, AC-14, AC-16)
   - [x] Analysis guards: `analyse.py` refuses a status that is not `ok` and a case count that differs from `n_cases`, toy fixtures, star follows `alpha` (AC-12, AC-14)
   - [x] Records: `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording (AC-17, AC-19)
-  - [ ] Review fixes: test fold case set done; resume on `device` and `gpu`, stars, table guards and `protocol_hash` coverage wait on `/architect`
+  - [x] Review fixes: test fold case set, resume on `device` and `gpu`, star caption, table guards, sealed `predict()` (AC-5, AC-14, AC-16, AC-20)
   - [ ] Human run: val sweep on the Kaggle T4, analyse, tables, check (AC-18)
 - [ ] Verify it: /check verify E2 missing modality evaluation
 - [ ] Test it: /test E2 missing modality evaluation
