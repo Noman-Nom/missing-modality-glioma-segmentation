@@ -26,12 +26,12 @@ E2 measures how far the E1 model falls when MRI sequences are missing (RQ1). It 
 - **AC-9 Tie out to E1.** On val, `check_rules()` compares pattern 1 with the E1 `metrics_val.csv`: `gpu` in the eval `run.json` equals `gpu` in the E1 `run.json`, the case set is equal, mean Dice per region differs by at most 0.001, and each (case, region) Dice by at most 0.01. A failure means the cache or the inference drifted, and no E2 number is trusted.
 - **AC-10 Run record.** `run.json` holds the keys in *Data model*, including `protocol_hash`, `predict_seconds` and `metric_seconds`, so the real HD95 cost is measured. Status moves as in *State transitions*. Any exception sets `failed` with a `reason`, and exit 1.
 - **AC-11 Statistics module.** `common/stats.py` provides `paired_wilcoxon`, `holm`, `friedman`, `bootstrap_indices` and `bootstrap_ci` with the exact rules in *Statistics protocol*, each tested on a toy case with a known answer, including `holm` on a textbook example and all zero differences.
-- **AC-12 Analysis.** `analyse.py --eval <dir>` reads only `metrics.csv` and `config.toml`, stops with exit 1 if any (case, pattern, region) row is missing, and writes `stats.csv` (90 rows), `friedman.csv` (18 rows) and `marginal.csv` (24 rows). Two runs give byte identical files. No GPU is used.
+- **AC-12 Analysis.** `analyse.py --eval <dir>` reads only `metrics.csv`, `config.toml` and `run.json`. It runs four checks in this order, and stops at the first that fails with `SystemExit("ERROR: ...")`, which is exit 1: `run.json` is present; its `status` is `ok`; no (case, pattern, region) row is missing; the number of cases in `metrics.csv` equals `n_cases` in `run.json`. A `status` or `n_cases` that is absent or null counts as a failed check. A corrupt `run.json` may stay a plain traceback, which also exits 1. A refusal writes no output file and leaves any older one untouched. The `status` check is needed because a sweep that stops between two cases leaves every remaining row whole. A quick run with status `ok` is accepted, because AC-15 needs it. Otherwise it writes `stats.csv` (90 rows), `friedman.csv` (18 rows) and `marginal.csv` (24 rows). Two runs give byte identical files. No GPU is used.
 - **AC-13 Verdict.** `analyse.py` prints and stores in `verdict.txt` the H1 result under the decision rule in *Statistics protocol*, using exactly the *Verdict lines* template, with no human judgement.
-- **AC-14 Tables and heatmap.** `make_table.py --eval <dir>` writes four LaTeX files to `writing/tables/`: `0004-missing-eval-<fold>-dice.tex`, `-hd95.tex`, `-marginal.tex` and `-heatmap.tex` (PGFPlots), laid out as in *Table layouts*. They read only the analysis CSVs and `run.json`. Each carries a header comment with run id, config hash, git commit and seed, and a caption with n, seed and fold. A val caption says: `Development fold, not a test result. The checkpoint was chosen on this fold at complete input, so pattern 1 is slightly optimistic.` A test caption says: `Test fold, opened once.` All four compile under XeLaTeX through the committed stub `writing/tracer/e2-preview.tex`, with no new package install.
+- **AC-14 Tables and heatmap.** `make_table.py --eval <dir>` writes four LaTeX files to `writing/tables/`: `0004-missing-eval-<fold>-dice.tex`, `-hd95.tex`, `-marginal.tex` and `-heatmap.tex` (PGFPlots), laid out as in *Table layouts*. They read only the analysis CSVs, `run.json`, and `alpha` from `config.toml` in the eval folder (the same value `analyse.py` uses for the verdict). Each carries a header comment with run id, config hash, git commit and seed, and a caption with n, seed and fold. A val caption says: `Development fold, not a test result. The checkpoint was chosen on this fold at complete input, so pattern 1 is slightly optimistic.` A test caption says: `Test fold, opened once.` All four compile under XeLaTeX through the committed stub `writing/tracer/e2-preview.tex`, with no new package install.
 - **AC-15 Determinism.** Two `--quick` runs with the same seed, in two different `--out` folders (AC-6 refuses a second run in one), give byte equal `metrics.csv` and analysis files on CPU. `evaluate.py` calls `set_seed([eval].seed)` before loading the model.
 - **AC-16 Check.** `check_eval.py <eval dir> [--run <E1 run>]` is a thin wrapper around `common.evaluation.check_rules(eval_dir, source_run)`. `--run` defaults to `source_run` in `run.json`, and is needed when the eval folder moved between machines. It exits 1 on any failed rule: status `ok`, `quick` false, row count, every case and pattern present, no NaN, AC-9 on val, and on test a `protocol_hash` equal to the val eval's. It prints the reason for each failure. On val it also prints the projected test time: `(predict_seconds + metric_seconds) * 2 / 3600` hours, because test has exactly twice the cases.
-- **AC-17 Kaggle and records.** `experiments/0004-missing-eval/KAGGLE.md` gives the full val run and the session death steps. It pins the exact git commit at clone, so a resume in a new session matches `git_commit`. It also covers the rebuild of the val cache, and copying the val eval folder into the `--out` folder for a later test run, because `/kaggle/input` is read only. ADR 0002 records that E2 also runs on the T4, and that `best.pt` sits in a private Kaggle dataset. `data/DATA.md` lists that dataset. `experiments/AGENTS.md` maps E2 to `0004-missing-eval`.
+- **AC-17 Kaggle and records.** `experiments/0004-missing-eval/KAGGLE.md` gives the full val run and the session death steps. It pins the exact git commit at clone, so a resume in a new session matches `git_commit`. It also covers the rebuild of the val cache, and copying the val eval folder into the `--out` folder for a later test run, because `/kaggle/input` is read only. Any copy of an eval folder keeps `run.json`, because `analyse.py` refuses a folder without it. ADR 0002 records that E2 also runs on the T4, and that `best.pt` sits in a private Kaggle dataset. `data/DATA.md` lists that dataset. `experiments/AGENTS.md` maps E2 to `0004-missing-eval`.
 - **AC-18 The real val run.** The human runs the val sweep on the Kaggle T4 for seed 42. `check_eval.py` passes, and the four tables compile. Timings go in `run.json`, not guessed.
 - **AC-19 Scope reword.** Feature 6's done line says val scored and test path proven. Feature 7's says it owns the single joint test opening of E1, E3 and E4.
 
@@ -133,7 +133,7 @@ Eval status: `running → ok`, `running → failed`, `running or failed → runn
 | Command | Key inputs | Key outputs | Gate | Key errors |
 |---|---|---|---|---|
 | `experiments/0004-missing-eval/evaluate.py` | `--run` (req), `--fold val or test` (req), `--out` (default `results/0004-missing-eval`), `--config`, `--device auto or cpu`, `--quick`, `--open-test`, `--rerun-reason` | eval folder, `metrics.csv`, `run.json` | AC-7 for test | 1 source or run failure; 2 guard, gate, finished folder, resume mismatch |
-| `.../analyse.py` | `--eval` (req) | `stats.csv`, `friedman.csv`, `marginal.csv`, `verdict.txt` | none | 1 incomplete or non `ok` eval |
+| `.../analyse.py` | `--eval` (req) | `stats.csv`, `friedman.csv`, `marginal.csv`, `verdict.txt` | none | 1 `run.json` missing, status not `ok`, a missing row, or a case count that differs from `n_cases` |
 | `.../make_table.py` | `--eval` (req), `--out-dir` (default `writing/tables`) | four `.tex` files | none | 1 analysis CSV missing or wrong row count |
 | `.../check_eval.py` | eval dir (positional), `--run` | pass or the failures | none | 1 any rule failed |
 
@@ -178,14 +178,16 @@ Holm is about 6 lines here. SciPy has no Holm function, and `statsmodels` is not
 | evaluate | `wall_time_s` | `time.time()` around the sweep, added across resumes |
 | evaluate | `reason` | the exception text on failure |
 | analyse | bootstrap seed, resamples, alpha | `[eval]` in the eval folder's `config.toml` |
+| analyse | `status`, `n_cases` for the guards | `run.json` in the eval folder |
 | analyse | `d` | `metrics.csv`, pattern p minus pattern 1, matched on case and region |
 | analyse | `n_pred_empty` | `metrics.csv` `pred_empty` count |
 | check | E1 Dice for the tie out | `<run>/metrics_val.csv`, from `--run`, else `source_run` in `run.json` |
 | make_table | captions | `run.json` plus `n` in `stats.csv` |
+| make_table | `alpha` for the star | `[eval]` in the eval folder's `config.toml` |
 
 ### Key invariants
 
-- Every pattern scores the same cases. `analyse.py` refuses gaps.
+- Every pattern scores the same cases. `analyse.py` refuses gaps, whole missing cases included, and any eval that is not status `ok`.
 - No script reads a test case without passing `check_test_gate()`.
 - Pattern 1 goes through the same path as all others, so complete input is not special cased.
 - A row in `metrics.csv` depends only on the case, the pattern and the weights, so resume cannot change a value.
@@ -206,6 +208,7 @@ Single researcher, no accounts. Outputs hold numbers and case IDs only, never im
 ### Critical test scenarios
 
 - Happy path: synthetic E1 run, `--quick` on val, then `analyse.py`, `make_table.py`: 2 × 15 × 3 rows and all files, verifies **AC-3**, **AC-12**, **AC-14**.
+- Died sweep: a hand built toy folder (not `EVAL_STOP_AFTER`, which stops between cases only at a multiple of 15) stopped between two cases, so every present case is whole, is refused with exit 1 and no output file while status is `running`; a `metrics.csv` with fewer cases than `n_cases` is refused under status `ok`, verifies **AC-12**.
 - Resume: `EVAL_STOP_AFTER=7` plus a truncated last line, then rerun: equal to an uninterrupted run, verifies **AC-5**.
 - Test gate: each missing condition refused with exit 2 and no test case loaded, then the same call passes on a synthetic non quick run with a clean `git_info`, verifies **AC-7**.
 - Second run: a finished folder refused, then accepted with a reason, and the old folder kept, verifies **AC-6**.
@@ -223,8 +226,9 @@ Tracer Bullet: one thin path first, then thicken.
 5. Full statistics: HD95, Friedman, marginal, bootstrap, `verdict.txt`, satisfies **AC-11**, **AC-12**, **AC-13**
 6. Remaining tables and heatmap, XeLaTeX compile, satisfies **AC-14**
 7. `check_eval.py` with the tie out, satisfies **AC-9**, **AC-16**
-8. `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording, `docs/whats-built.md`, tracker, satisfies **AC-17**, **AC-19**
-9. Human: upload the E1 run, run the val sweep, analyse, tables, check, satisfies **AC-18**
+8. Analysis guards: `analyse.py` reads `run.json`, runs the AC-12 checks in order, and lines 4 and 5 of its docstring say so. The `make_table.py` docstring names `run.json` and `alpha` from `config.toml`. `write_toy_metrics` also writes a `run.json` and takes `status` and `n_cases`, so its callers stay short, and `test_analyse_differences_are_matched_on_case` gets a `run.json` by hand, because it builds its own folder. A test proves the star follows `alpha` in the eval folder's `config.toml` (no code change for that). Build this before step 10, because `analyse.py` is in `protocol_hash`, satisfies **AC-12**, **AC-14**
+9. `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording, `docs/whats-built.md` (including the sentence that says `analyse.py` reads only `metrics.csv` and `config.toml`), tracker, satisfies **AC-17**, **AC-19**
+10. Human: upload the E1 run, run the val sweep, analyse, tables, check, satisfies **AC-18**
 
 ## Consequences
 
@@ -242,6 +246,7 @@ Tracer Bullet: one thin path first, then thicken.
 - Kaggle now also holds model weights, and uses more GPU quota.
 - Holm per region is less strict than one family of 42 tests.
 - One seed means the results describe variation between subjects, not between trained models.
+- `analyse.py` cannot give a partial reading of a running sweep. That is on purpose: a verdict on part of a fold is not a result.
 
 **Neutral**:
 - Proposal wording grows slightly: Friedman is new, and HD95 is named secondary.

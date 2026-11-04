@@ -45,6 +45,25 @@ A flag, a clean tree and one finished run were chosen. A flag alone proves nothi
 ### Output format
 PGFPlots was chosen because it is already installed with TeX Live and adds no lock change. `matplotlib` would need an ADR. Generated `.tex` goes to `writing/tables/`, because that folder is already ignored by git, and `writing/figures/` is not.
 
+### Spec update 2026-11-04: `analyse.py` guards and the source of `alpha`
+Milestone 3 found two contradictions in this spec. AC-12 said `analyse.py` reads only `metrics.csv` and `config.toml`, while the API table said it stops on a non `ok` eval. AC-14 said tables read only the analysis CSVs and `run.json`, while the star needs `alpha`.
+
+**Status check.** The row check alone does not catch a died sweep. `load_metrics` builds its expected rows from the cases already in `metrics.csv`, so a sweep that stops between two cases looks complete.
+- **Chosen: status plus case count.** `analyse.py` also reads `run.json`. Status catches the died sweep and the NaN failure. `n_cases` catches a `metrics.csv` cut short under status `ok`, for example a part copy from Kaggle.
+- Status only: fixes the died sweep, but a cut short file passes `analyse.py` and is caught only if `check_eval.py` is run.
+- Keep as built and fix the API table: no code change, but a part sweep can write a full verdict.
+- Runner up in the spirit of reuse: call `check_rules()`. It refuses quick runs and needs the E1 run, so AC-15 would fail and `analyse.py` would stop being standalone.
+
+`make_table.py` needs no status check of its own. It needs the analysis CSVs, and any folder analysed after build step 8 can hold them only at status `ok`. A folder analysed before that step and then resumed could keep stale CSVs, because a resume does not delete them. No real E2 folder exists, so this cannot happen in practice.
+
+**Source of `alpha`.** The spec moved to match the code.
+- **Chosen: `[eval] alpha` in the eval folder's `config.toml`.** One value, the one `analyse.py` already uses, and it sits inside `protocol_hash`. No code change.
+- A `significant` column in `stats.csv`: AC-14 keeps its wording, but the columns, `make_table.py` and tests change for no gain.
+- `alpha` in `run.json`: a new AC-10 key holding a copy of a value, so two places could differ.
+- A constant in `make_table.py`: a second source, and it would silently ignore the config.
+
+One small limit stays. The verdict uses unrounded p values, while the star reads `%.6g` from `stats.csv`. A p value within about 0.00000005 below alpha could be significant in the verdict and unstarred in the table. This is left as it is, because the verdict is the rule and the star is display.
+
 ## Rationale
 
 The test fold is the scarcest resource in the study, so the design protects it at every step: val is the rehearsal, the code gate is the lock, and `protocol_hash` is the evidence that rehearsal and real run used the same rules. This costs a delay in the RQ1 table, which is a fair price given that RQ2 is the main contribution and depends on a clean comparison.
@@ -63,6 +82,8 @@ Smaller calls, with the runner up:
 
 ## Cross check
 
+A second independent read on 2026-11-04 (Sonnet, read only) covered the spec update above. It confirmed the design, `n_cases` on quick runs and after a resume, and the renumbered build steps. Its 7 gaps were applied on the engineer's choice: the check order and error style, absent `status` or `n_cases`, older files after a refusal, the test fixture change, the died sweep setup, the stale doc lines, and keeping `run.json` in any copy. A copy that swaps cases but keeps the count is not caught by `analyse.py` or `check_rules()`, which was judged negligible.
+
 An independent read on 2026-11-04 (Sonnet, read only) found 18 items, all applied to `index.md` on the engineer's choice. The main ones: the Friedman and marginal faults above, the late protocol check, an overclaim about single opening, and the undefined formats that byte identical output needs. It also confirmed the row counts and the helper signatures against the code.
 
 ## Evidence
@@ -71,4 +92,5 @@ Measured 2026-11-04 from the repo:
 - `run.json`: 26,577 s wall time, 0.60 s per iteration, val 256 s per point, peak reserved 1,136 MiB, Tesla T4.
 - `splits.csv`: test 255 cases, 228 at timepoint 000, 7 empty ET, 1 empty TC, 1 `neg_values_flag`, 0 `flair_mask_flag`.
 - `val_log.csv`: pattern 1 only, so no E2 number exists yet.
+- Died sweep toy (2026-11-04, throwaway script, `analyse.py` as built at `e2c7b41`): 3 cases of a planned 114, each with all 45 rows, no `run.json`. Exit 0, with 90, 18 and 24 rows and a `verdict.txt`. Toy numbers, not a result.
 - `pgfplots.sty` is installed. `matplotlib` and `statsmodels` are not in `uv.lock`.

@@ -23,9 +23,9 @@ Expected: all pass, `slow` deselected, ruff clean. Tests live in `tests/test_com
 | AC-9, AC-16 | Toy eval folders, one rule broken at a time: GPU differs, mean off by 0.002, one case off by 0.02, each refused; the projected hours printed on val |
 | AC-10 | Exact `run.json` key set; an injected exception gives `failed` and a `reason` |
 | AC-11 | Toy cases with known answers, including fully tied Friedman rows giving statistic 0, p 1, W 0 |
-| AC-12 | Row counts (90, 18, 24), a missing row refused, two runs byte identical; a toy case where `marginal.csv` gives a known matched pair answer |
+| AC-12 | Row counts (90, 18, 24), a missing row refused, two runs byte identical; a toy case where `marginal.csv` gives a known matched pair answer; refused with exit 1 and no output file: `run.json` missing, each status that is not `ok`, `status` or `n_cases` absent or null, a sweep stopped between two cases, and fewer cases than `n_cases` under status `ok`; a refusal leaves an older output file byte equal; a quick run with status `ok` accepted |
 | AC-13 | Toy CSVs reaching each `H1a` and `H1b` line, compared exactly with the template |
-| AC-14 | Captions, header comment, val note present; a wrong row count refused; a test reads `e2-preview.tex` and finds the four inputs |
+| AC-14 | Captions, header comment, val note present; a wrong row count refused; a test reads `e2-preview.tex` and finds the four inputs; a star appears or goes when `alpha` changes in the eval folder's `config.toml` |
 | AC-15 | Two quick CPU runs in two `--out` folders, byte equal |
 
 Script rule: `tests/test_experiment_scripts.py` covers the new scripts (nothing runs on import).

@@ -2,8 +2,9 @@
 
     uv run python experiments/0004-missing-eval/make_table.py --eval <eval dir>
 Writes 0004-missing-eval-<fold>-dice.tex, -hd95.tex, -marginal.tex and -heatmap.tex. No number is
-typed by hand. Exit 1 if an analysis CSV is missing or has the wrong row count. The four files
-compile through writing/tracer/e2-preview.tex.
+typed by hand. Reads only the analysis CSVs, run.json, and alpha from config.toml in the eval folder
+(the value analyse.py uses for the verdict). Exit 1 if an analysis CSV is missing or has the wrong
+row count. The four files compile through writing/tracer/e2-preview.tex.
 """
 import argparse
 import csv

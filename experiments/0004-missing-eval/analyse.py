@@ -1,10 +1,11 @@
 """metrics.csv of one eval folder -> the statistics of spec 0004 (AC-12, AC-13).
 
     uv run python experiments/0004-missing-eval/analyse.py --eval <eval dir>
-Reads only metrics.csv and config.toml, and writes stats.csv (90 rows), friedman.csv (18 rows),
-marginal.csv (24 rows) and verdict.txt. Uses no GPU. Exit 1 if any (case, pattern, region) row is
-missing. The rules are the Statistics protocol of the spec: changing this file changes
-protocol_hash, so it costs a val rerun.
+Reads only metrics.csv, config.toml and run.json, and writes stats.csv (90 rows), friedman.csv
+(18 rows), marginal.csv (24 rows) and verdict.txt. Uses no GPU. Exit 1, writing nothing, unless
+run.json is there, its status is ok, no (case, pattern, region) row is missing and the case count
+equals n_cases, checked in that order. The rules are the Statistics protocol of the spec: changing
+this file changes protocol_hash, so it costs a val rerun.
 """
 import argparse
 import csv
@@ -16,7 +17,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.data import MODALITIES, REGIONS
 from common.missing import BIT, PATTERNS
-from common.runlog import load_config
+from common.runlog import load_config, load_run
 from common.stats import bootstrap_ci, bootstrap_indices, friedman, holm, paired_wilcoxon
 
 STATS_COLUMNS = ["metric", "region", "pattern_id", "pattern_name", "n", "mean", "median",
@@ -33,6 +34,17 @@ TESTED = [p for p in PATTERNS if p != BASE]
 # patterns of equal size, so Friedman compares which modalities are missing, not how many
 GROUPS = {n: [p.id for p in PATTERNS.values() if len(p.missing) == n] for n in (1, 2, 3)}
 ID_OF_MASK = {p.mask: p.id for p in PATTERNS.values()}
+
+
+def load_finished(eval_dir):
+    """run.json of a finished sweep. A sweep that died between two cases leaves every remaining
+    row whole, so only the status can refuse it (AC-12)."""
+    if not (eval_dir / "run.json").is_file():
+        raise SystemExit(f"ERROR: {eval_dir / 'run.json'} missing")
+    rec = load_run(eval_dir)
+    if rec.get("status") != "ok":
+        raise SystemExit(f"ERROR: eval status is {rec.get('status')!r}, expected 'ok'")
+    return rec
 
 
 def load_metrics(path):
@@ -146,7 +158,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--eval", required=True, type=Path)
     a = ap.parse_args(argv)
+    rec = load_finished(a.eval)
     df = load_metrics(a.eval / "metrics.csv")
+    if df["case"].nunique() != rec.get("n_cases"):
+        raise SystemExit(f"ERROR: metrics.csv has {df['case'].nunique()} cases, "
+                         f"expected n_cases {rec.get('n_cases')}")
     cfg = load_config(a.eval / "config.toml")["eval"]
     indices = bootstrap_indices(df["case"].nunique(), cfg["bootstrap_resamples"], cfg["seed"])
     keys = [(m, g) for m in METRICS for g in REGIONS]

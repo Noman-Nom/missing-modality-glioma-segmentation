@@ -128,6 +128,7 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
   - [x] Thin thread: `common/evaluation.py`, `evaluate.py`, Wilcoxon and Holm, Dice table, quick run on synthetic cases (AC-1, AC-2, AC-3, AC-4, AC-15)
   - [x] Robust sweep: run record, one finished run rule, resume, test gate proven on synthetic cases (AC-5, AC-6, AC-7, AC-8, AC-10)
   - [x] Full statistics and outputs: HD95, Friedman, marginal, bootstrap, verdict, tables, heatmap, `check_eval.py` with the tie out (AC-9, AC-11, AC-12, AC-13, AC-14, AC-16)
+  - [x] Analysis guards: `analyse.py` refuses a status that is not `ok` and a case count that differs from `n_cases`, toy fixtures, star follows `alpha` (AC-12, AC-14)
   - [ ] Records: `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording (AC-17, AC-19)
   - [ ] Human run: val sweep on the Kaggle T4, analyse, tables, check (AC-18)
 - [ ] Verify it: /check verify E2 missing modality evaluation

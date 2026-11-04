@@ -239,6 +239,7 @@ def test_analyse_differences_are_matched_on_case(quick_eval, tmp_path):
     shuffled = tmp_path / "ev"
     shuffled.mkdir()
     shutil.copy(quick_eval / "config.toml", shuffled)
+    shutil.copy(quick_eval / "run.json", shuffled)
     with open(shuffled / "metrics.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
@@ -252,9 +253,12 @@ def falls_by_a_tenth(case, pattern):
 
 
 def write_toy_metrics(path, drop=None, dice=falls_by_a_tenth, hd95=lambda case, pattern: 1.0,
-                      cases=3):
-    """A toy metrics.csv beside the [eval] config. dice and hd95 are functions of (case, pattern)."""
+                      cases=3, status="ok", n_cases=None):
+    """A toy metrics.csv beside the [eval] config and a run.json. dice and hd95 are functions of
+    (case, pattern). n_cases defaults to cases, so a toy folder is finished unless a test says so."""
     dump_config(load_config(E2 / "config.toml"), path.parent / "config.toml")
+    (path.parent / "run.json").write_text(json.dumps(
+        {"status": status, "n_cases": cases if n_cases is None else n_cases}))
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
@@ -449,6 +453,99 @@ def test_analyse_refuses_a_duplicate_row(tmp_path):
         analyse.main(["--eval", str(tmp_path)])
 
 
+OUTPUTS = ("stats.csv", "friedman.csv", "marginal.csv", "verdict.txt")
+
+
+def assert_analysis_refused(folder, message):
+    """analyse.py stops with this error and writes no output file."""
+    with pytest.raises(SystemExit, match=message) as e:
+        analyse.main(["--eval", str(folder)])
+    assert str(e.value).startswith("ERROR: ")
+    assert not [n for n in OUTPUTS if (folder / n).exists()]
+
+
+# covers: AC-12
+def test_analyse_refuses_a_folder_with_no_run_json(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv")
+    (tmp_path / "run.json").unlink()
+    assert_analysis_refused(tmp_path, "run.json missing")
+
+
+# covers: AC-12. interrupted is in runlog.STATUSES; an eval never writes it, but it is still not ok.
+@pytest.mark.parametrize("status", ["running", "failed", "interrupted"])
+def test_analyse_refuses_every_status_that_is_not_ok(tmp_path, status):
+    write_toy_metrics(tmp_path / "metrics.csv", status=status)
+    assert_analysis_refused(tmp_path, f"status is '{status}'")
+
+
+# covers: AC-12. Absent and null both count as a failed check, not as a KeyError.
+@pytest.mark.parametrize(("key", "message"), [("status", "status is None"),
+                                              ("n_cases", "expected n_cases None")])
+@pytest.mark.parametrize("absent", [True, False], ids=["absent", "null"])
+def test_analyse_refuses_a_status_or_case_count_with_no_value(tmp_path, key, message, absent):
+    write_toy_metrics(tmp_path / "metrics.csv")
+    edit_json(tmp_path, **{key: None})
+    if absent:
+        rec = load_run(tmp_path)
+        del rec[key]
+        (tmp_path / "run.json").write_text(json.dumps(rec))
+    assert_analysis_refused(tmp_path, message)
+
+
+# covers: AC-12. A died sweep: 3 whole cases of a planned 114 pass the row check, so the status
+# is what refuses it.
+def test_analyse_refuses_a_sweep_stopped_between_two_cases(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", status="running", n_cases=114)
+    assert analyse.load_metrics(tmp_path / "metrics.csv")["case"].nunique() == 3
+    assert_analysis_refused(tmp_path, "status is 'running'")
+
+
+# covers: AC-12. The same refusal on a folder the real sweep left, not a hand built one: the
+# stop lands on a case boundary, so 1 of 2 cases is there and whole.
+def test_analyse_refuses_a_real_stopped_sweep(e1_run, tmp_path, monkeypatch):
+    folder = stop_after(e1_run, tmp_path, 15, monkeypatch)
+    assert analyse.load_metrics(folder / "metrics.csv")["case"].nunique() == 1
+    assert_analysis_refused(folder, "status is 'running'")
+
+
+# covers: AC-12. A part copy from Kaggle: status ok, but the file was cut short. Too many is refused
+# the same way.
+@pytest.mark.parametrize("n_cases", [114, 2])
+def test_analyse_refuses_a_case_count_that_differs_from_n_cases(tmp_path, n_cases):
+    write_toy_metrics(tmp_path / "metrics.csv", n_cases=n_cases)
+    assert_analysis_refused(tmp_path, f"3 cases, expected n_cases {n_cases}")
+
+
+# covers: AC-12. The four checks run in the spec order: each folder below fails two of them, and
+# the earlier one must speak.
+def test_analyse_checks_run_in_the_spec_order(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", status="failed")
+    (tmp_path / "metrics.csv").unlink()
+    assert_analysis_refused(tmp_path, "status is 'failed'")
+    write_toy_metrics(tmp_path / "metrics.csv", status="failed", drop=(1, 7, "TC"))
+    assert_analysis_refused(tmp_path, "status is 'failed'")
+    write_toy_metrics(tmp_path / "metrics.csv", drop=(1, 7, "TC"), n_cases=114)
+    assert_analysis_refused(tmp_path, "missing")
+
+
+# covers: AC-12
+def test_a_refusal_leaves_older_output_files_byte_equal(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv")
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    before = {n: (tmp_path / n).read_bytes() for n in OUTPUTS}
+    edit_json(tmp_path, status="running")
+    with pytest.raises(SystemExit, match="status is 'running'"):
+        analyse.main(["--eval", str(tmp_path)])
+    assert {n: (tmp_path / n).read_bytes() for n in OUTPUTS} == before
+
+
+# covers: AC-12, AC-15. The quick_eval fixture runs analyse.py, and a quick run has to pass.
+def test_analyse_accepts_a_quick_run_with_status_ok(quick_eval):
+    rec = load_run(quick_eval)
+    assert (rec["quick"], rec["status"], rec["n_cases"]) == (True, "ok", 2)
+    assert all((quick_eval / n).is_file() for n in OUTPUTS)
+
+
 @pytest.fixture(scope="module")
 def tables(quick_eval, tmp_path_factory):
     out = tmp_path_factory.mktemp("tables")
@@ -494,6 +591,27 @@ def test_dice_cells_star_follows_holm_p_and_the_config_alpha():
     assert make_table.dice_cells(row, 0.05) == ["0.800", "-0.100$^{*}$", "[-0.120, -0.080]"]
     assert make_table.dice_cells(row, 0.01) == ["0.800", "-0.100", "[-0.120, -0.080]"]
     assert make_table.dice_cells(row | {"mean_diff": "", "p_holm": ""}, 0.05) == ["0.800", "--", "--"]
+
+
+# covers: AC-14. Through main: the star comes from alpha in the eval folder's config.toml. 3 toy
+# cases give p_holm 1 everywhere, so one p value is set by hand, between the two alphas.
+@pytest.mark.parametrize(("alpha", "starred"), [(0.05, True), (0.01, False)])
+def test_table_star_follows_alpha_in_the_eval_folder_config(tmp_path, alpha, starred):
+    ev = tmp_path / "ev"
+    ev.mkdir()
+    write_toy_metrics(ev / "metrics.csv")
+    assert analyse.main(["--eval", str(ev)]) == 0
+
+    def set_p(rows):
+        next(r for r in rows if r["pattern_id"] == "2")["p_holm"] = "0.04"
+
+    edit_csv(ev / "stats.csv", set_p)
+    cfg = load_config(ev / "config.toml")
+    dump_config(cfg | {"eval": cfg["eval"] | {"alpha": alpha}}, ev / "config.toml")
+    edit_json(ev, fold="val", seed=42, eval_id="x", config_hash="c", git_commit="g")
+    assert make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)]) == 0
+    tex = (tmp_path / "0004-missing-eval-val-dice.tex").read_text()
+    assert (make_table.STAR in tex) == starred
 
 
 # covers: AC-14. HD95 leads with the median, 1 decimal, and pattern 1 has no star.
