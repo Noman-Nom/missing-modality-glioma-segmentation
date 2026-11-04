@@ -59,6 +59,8 @@ Rules:
 - Data: a **private** Kaggle dataset, `muhammadnomanned/brats-gli-train`, holding one file, `brats-gli-train.tar.bin` (an uncompressed tar, 13,394,974,720 bytes). Kaggle unpacks `.zip` and `.nii.gz` files on upload and renames some of them, so the folder is packed as a tar with a name Kaggle does not recognise, and the notebook unpacks it. Details in `data/DATA.md`.
 - Results go to `/kaggle/working/` (saved as the notebook's output) and are copied back into `results/` in the repo checkout by the human.
 - The laptop stays the machine for development, `uv run pytest -q`, slow tests and `--quick` runs.
+- E2 also runs on the T4 (added 2026-11-04, spec 0004). Its check compares pattern 1 with E1's val Dice, so it has to use the GPU E1 used. The steps live in `experiments/0004-missing-eval/KAGGLE.md`. The notebook pins one exact commit instead of cloning the tip of `main`, because a resume refuses a different `git_commit`.
+- The E1 model weights sit in a **private** Kaggle dataset, `muhammadnomanned/brats-e1-run`, holding one file, `e1-run.tar.bin`. It holds `best.pt` and the three run files the sweep reads. Details in `data/DATA.md`.
 
 ## Rationale
 
@@ -73,6 +75,7 @@ The benchmark shows the same environment, the same losses and the same memory, w
 **Negative / tradeoffs**:
 - A private copy of BraTS data sits on Kaggle. The BraTS 2023 terms are still "to confirm" in `data/DATA.md`; confirm that they allow this before the thesis is submitted (ask the supervisor if unclear).
 - Sessions can die. The resume steps in KAGGLE.md must be followed, including deleting a stale `train.pid`.
+- Kaggle now also holds model weights trained on BraTS data, and E2 uses more GPU quota.
 - Runs are not bit-identical across GPUs. Only the 30-step loss match is shown; no cross-machine claim beyond that.
 
 **Neutral**:
@@ -87,6 +90,6 @@ The benchmark shows the same environment, the same losses and the same memory, w
 
 ## References
 
-- `experiments/0003-baseline/gpu_bench.py`, `experiments/0003-baseline/KAGGLE.md`
+- `experiments/0003-baseline/gpu_bench.py`, `experiments/0003-baseline/KAGGLE.md`, `experiments/0004-missing-eval/KAGGLE.md`
 - ADR 0001 (environment, CUDA 13 build)
-- `docs/specs/thesis/0003-complete-input-baseline/`
+- `docs/specs/thesis/0003-complete-input-baseline/`, `docs/specs/thesis/0004-missing-modality-evaluation/`

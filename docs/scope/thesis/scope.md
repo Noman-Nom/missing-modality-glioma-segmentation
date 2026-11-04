@@ -120,7 +120,7 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
 
 ### 6. Missing-modality evaluation, 15 patterns (E2) · GA (in-progress)
 Measure how the baseline degrades under every one of the 15 non empty modality subsets (RQ1). Spec: [0004](../../specs/thesis/0004-missing-modality-evaluation/index.md).
-Done when: every pattern is scored per region (Dice, HD95) on the same subjects, the protocol is fixed before any test fold number is seen, and the table comes from a script.
+Done when: every pattern is scored per region (Dice, HD95) on the same val subjects, the test path is proven on synthetic cases with the real test fold still sealed, the protocol is fixed before any test fold number is seen, and the tables come from a script.
 Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-missing-eval/`.
 
 - [x] Design it (spec): /architect missing modality evaluation
@@ -129,7 +129,7 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
   - [x] Robust sweep: run record, one finished run rule, resume, test gate proven on synthetic cases (AC-5, AC-6, AC-7, AC-8, AC-10)
   - [x] Full statistics and outputs: HD95, Friedman, marginal, bootstrap, verdict, tables, heatmap, `check_eval.py` with the tie out (AC-9, AC-11, AC-12, AC-13, AC-14, AC-16)
   - [x] Analysis guards: `analyse.py` refuses a status that is not `ok` and a case count that differs from `n_cases`, toy fixtures, star follows `alpha` (AC-12, AC-14)
-  - [ ] Records: `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording (AC-17, AC-19)
+  - [x] Records: `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording (AC-17, AC-19)
   - [ ] Human run: val sweep on the Kaggle T4, analyse, tables, check (AC-18)
 - [ ] Verify it: /check verify E2 missing modality evaluation
 - [ ] Test it: /test E2 missing modality evaluation
@@ -140,7 +140,7 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
 
 ### 7. Modality dropout (E3) and presence indicator (E4) · needs a decision · GA (planned)
 Compare simple robustness strategies against zero fill, on the same subjects, splits, metrics and seeds (RQ2).
-Done when: each strategy is trained and evaluated on all 15 patterns, and any claimed benefit rests on a paired comparison.
+Done when: each strategy is trained and evaluated on all 15 patterns, any claimed benefit rests on a paired comparison, and the single joint test opening of E1, E3 and E4 has run (this feature owns it, through the sealed test path of E2).
 
 - [ ] Design it (spec): /architect modality dropout and presence indicator
 
