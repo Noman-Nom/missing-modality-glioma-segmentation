@@ -1,6 +1,6 @@
-"""Spec 0004 on a real synthetic E1 run: guards, the quick sweep, analyse, the Dice table,
+"""Spec 0004 on a real synthetic E1 run: guards, the quick sweep, analyse, the tables,
 determinism, the run record, the folder rule, resume, the test gate and check_rules (AC-1, AC-2,
-AC-3, AC-5, AC-6, AC-7, AC-9, AC-10, AC-15, AC-16). CPU only, no real data."""
+AC-3, AC-5, AC-6, AC-7, AC-9, AC-10, AC-12, AC-13, AC-14, AC-15, AC-16). CPU only, no real data."""
 import csv
 import hashlib
 import importlib.util
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from common.data import REGIONS
+from common.data import MODALITIES, REGIONS
 from common.evaluation import (
     EVAL_RUN_KEYS,
     METRIC_COLUMNS,
@@ -21,6 +21,7 @@ from common.evaluation import (
 from common.missing import PATTERNS
 from common.runlog import dump_config, load_config, load_run
 from conftest import only_run, write_case, write_splits
+from scipy.stats import chi2
 
 REPO = Path(__file__).resolve().parents[1]
 E1 = REPO / "experiments" / "0003-baseline"
@@ -34,7 +35,10 @@ def load(folder, name):
     return mod
 
 
-evaluate, analyse, make_table = (load(E2, n) for n in ("evaluate", "analyse", "make_table"))
+evaluate, analyse, make_table, check_eval = (
+    load(E2, n) for n in ("evaluate", "analyse", "make_table", "check_eval"))
+ANALYSIS_FILES = ("stats.csv", "friedman.csv", "marginal.csv", "verdict.txt")
+TABLE_NAMES = ("dice", "hd95", "marginal", "heatmap")
 
 
 @pytest.fixture(autouse=True)
@@ -200,21 +204,33 @@ def test_two_quick_runs_are_byte_equal(e1_run, tmp_path, quick_eval):
     assert run_eval(e1_run, tmp_path / "second", "--quick") == 0
     second = tmp_path / "second" / quick_eval.name
     assert analyse.main(["--eval", str(second)]) == 0
-    for name in ("metrics.csv", "stats.csv"):
+    for name in ("metrics.csv", *ANALYSIS_FILES):
         assert (quick_eval / name).read_bytes() == (second / name).read_bytes(), name
 
 
 def test_analyse_stats_rows(quick_eval):
     rows = rows_of(quick_eval / "stats.csv")
-    assert len(rows) == 45
-    assert [(r["region"], int(r["pattern_id"])) for r in rows] == [
-        (g, p) for g in REGIONS for p in range(1, 16)]
+    assert len(rows) == 90
+    assert [(r["metric"], r["region"], int(r["pattern_id"])) for r in rows] == [
+        (m, g, p) for m in ("dice", "hd95_mm") for g in REGIONS for p in range(1, 16)]
     for r in rows:
-        assert r["metric"] == "dice" and r["n"] == "2"
+        assert r["n"] == "2"
         assert r["pattern_name"] == PATTERNS[int(r["pattern_id"])].name
         tested = r["pattern_id"] != "1"
-        for k in ("mean_diff", "n_nonzero", "wilcoxon_stat", "p_raw", "p_holm"):
+        for k in ("mean_diff", "ci_low", "ci_high", "n_nonzero", "wilcoxon_stat", "p_raw",
+                  "p_holm"):
             assert bool(r[k]) == tested, k
+        assert r["n_pred_empty"] != ""
+
+
+# covers: AC-12
+def test_analyse_friedman_and_marginal_rows(quick_eval):
+    friedman = rows_of(quick_eval / "friedman.csv")
+    assert [(r["metric"], r["region"], r["n_missing"]) for r in friedman] == [
+        (m, g, str(k)) for m in ("dice", "hd95_mm") for g in REGIONS for k in (1, 2, 3)]
+    marginal = rows_of(quick_eval / "marginal.csv")
+    assert [(r["metric"], r["region"], r["modality"]) for r in marginal] == [
+        (m, g, x) for m in ("dice", "hd95_mm") for g in REGIONS for x in MODALITIES]
 
 
 # covers: AC-3 of the statistics path: d is pattern p minus pattern 1, matched on the case.
@@ -222,6 +238,7 @@ def test_analyse_differences_are_matched_on_case(quick_eval, tmp_path):
     rows = rows_of(quick_eval / "metrics.csv")
     shuffled = tmp_path / "ev"
     shuffled.mkdir()
+    shutil.copy(quick_eval / "config.toml", shuffled)
     with open(shuffled / "metrics.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
@@ -230,12 +247,18 @@ def test_analyse_differences_are_matched_on_case(quick_eval, tmp_path):
     assert (shuffled / "stats.csv").read_bytes() == (quick_eval / "stats.csv").read_bytes()
 
 
-def write_toy_metrics(path, drop=None):
-    """Dice falls by 0.1 at every incomplete pattern, one extra case to give 3 cases."""
+def falls_by_a_tenth(case, pattern):
+    return 0.8 + case / 100 - (pattern > 1) * 0.1
+
+
+def write_toy_metrics(path, drop=None, dice=falls_by_a_tenth, hd95=lambda case, pattern: 1.0,
+                      cases=3):
+    """A toy metrics.csv beside the [eval] config. dice and hd95 are functions of (case, pattern)."""
+    dump_config(load_config(E2 / "config.toml"), path.parent / "config.toml")
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
-        for i in range(3):
+        for i in range(cases):
             for p in range(1, 16):
                 for g in REGIONS:
                     if (i, p, g) == drop:
@@ -243,7 +266,7 @@ def write_toy_metrics(path, drop=None):
                     w.writerow({"eval_id": "x", "case": f"BraTS-GLI-0000{i}-000",
                                 "subject": f"0000{i}", "pattern_id": p, "region": g,
                                 "pattern_name": PATTERNS[p].name, "gt_empty": False,
-                                "dice": 0.8 + i / 100 - (p > 1) * 0.1, "hd95_mm": 1.0,
+                                "dice": dice(i, p), "hd95_mm": hd95(i, p),
                                 "pred_empty": p == 15 and i == 0})
 
 
@@ -257,6 +280,157 @@ def test_analyse_known_answer(tmp_path):
     assert last["mean"] == "0.710000" and last["mean_diff"] == "-0.100000"
     assert last["n_nonzero"] == "3" and last["n_pred_empty"] == "1"
     assert float(last["p_holm"]) == pytest.approx(min(1.0, 14 * float(last["p_raw"])))
+    # every difference is -0.1, so every bootstrap mean is too
+    assert (float(last["ci_low"]), float(last["ci_high"])) == pytest.approx((-0.1, -0.1))
+
+
+# covers: AC-12. Secondary metric: same tests as Dice, on its own rows.
+def test_analyse_hd95_rows_use_their_own_family(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", hd95=lambda i, p: 10.0 + p * (i + 1))
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    row = next(r for r in rows_of(tmp_path / "stats.csv")
+               if (r["metric"], r["region"], r["pattern_id"]) == ("hd95_mm", "WT", "3"))
+    assert row["mean"] == "16.000000" and row["median"] == "16.000000"  # 13, 16, 19
+    assert row["mean_diff"] == "4.000000" and row["n_nonzero"] == "3"  # d is 2, 4, 6
+
+
+# covers: AC-12. T1 adds exactly 0.1 at every case, the other three add nothing, so each pair
+# difference is known. mean_present and mean_absent are means over 7 patterns, not 8.
+def test_analyse_marginal_is_the_matched_pair_answer(tmp_path):
+    def dice(case, pattern):
+        return 0.5 + 0.1 * ("T1" in PATTERNS[pattern].present)
+
+    write_toy_metrics(tmp_path / "metrics.csv", dice=dice)
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    rows = {(r["metric"], r["region"], r["modality"]): r for r in rows_of(tmp_path / "marginal.csv")}
+    t1, t2 = rows["dice", "TC", "T1"], rows["dice", "TC", "T2"]
+    assert float(t1["mean_diff"]) == pytest.approx(0.1)
+    assert (float(t1["mean_present"]), float(t1["mean_absent"])) == pytest.approx((0.6, 0.5))
+    assert (float(t1["ci_low"]), float(t1["ci_high"])) == pytest.approx((0.1, 0.1))
+    assert float(t2["mean_diff"]) == pytest.approx(0.0)
+
+
+# covers: AC-12. Each pair differs by exactly one modality, and S is never empty.
+@pytest.mark.parametrize("modality", MODALITIES)
+def test_marginal_pairs_differ_by_exactly_that_modality(modality):
+    pairs = analyse.marginal_pairs(modality)
+    assert len(pairs) == 7
+    assert sum(1 for with_m, _ in pairs if with_m == 1) == 1
+    for with_m, without_m in pairs:
+        assert set(PATTERNS[with_m].present) - set(PATTERNS[without_m].present) == {modality}
+        assert len(PATTERNS[with_m].present) == len(PATTERNS[without_m].present) + 1
+
+
+# covers: AC-12. The groups compare patterns of one size, and every incomplete pattern is in one.
+def test_friedman_groups_hold_patterns_of_equal_size():
+    assert {k: len(v) for k, v in analyse.GROUPS.items()} == {1: 4, 2: 6, 3: 4}
+    assert sorted(p for ids in analyse.GROUPS.values() for p in ids) == list(range(2, 16))
+    for k, ids in analyse.GROUPS.items():
+        assert {len(PATTERNS[p].missing) for p in ids} == {k}
+
+
+# covers: AC-12. Hand worked: every case ranks the 4 patterns the same way, so with n = 4 and
+# k = 4 the statistic is n(k-1) = 12 and W is 1. HD95 stays flat, so it hits the coded tied case.
+def test_analyse_friedman_known_answer(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", dice=lambda i, p: 0.1 * p + i, cases=4)
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    rows = {(r["metric"], r["region"], r["n_missing"]): r for r in rows_of(tmp_path / "friedman.csv")}
+    dice = rows["dice", "WT", "1"]
+    assert dice["n"] == "4" and float(dice["statistic"]) == pytest.approx(12)
+    assert float(dice["kendall_w"]) == pytest.approx(1)
+    assert float(dice["p_raw"]) == pytest.approx(chi2.sf(12, 3), rel=1e-4)
+    flat = rows["hd95_mm", "WT", "1"]
+    assert (flat["statistic"], flat["p_raw"], flat["p_holm"], flat["kendall_w"]) == (
+        "0.000000", "1", "1", "0.000000")
+
+
+# covers: AC-12. Two runs on one folder give the same bytes, so the seed really fixes the CI.
+def test_analyse_twice_is_byte_identical(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", dice=lambda i, p: 0.8 - 0.01 * p * ((i * 7) % 3))
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    first = {n: (tmp_path / n).read_bytes() for n in ANALYSIS_FILES}
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    assert first == {n: (tmp_path / n).read_bytes() for n in ANALYSIS_FILES}
+
+
+# covers: AC-12, the rows of one family share one index matrix, so they are paired: two rows with
+# the same differences get the same CI.
+def test_analyse_every_row_uses_the_same_bootstrap_matrix(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", dice=lambda i, p: 0.8 - (p > 1) * (i + 1) / 100)
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    tested = [r for r in rows_of(tmp_path / "stats.csv")
+              if r["metric"] == "dice" and r["pattern_id"] != "1"]
+    assert len({(r["ci_low"], r["ci_high"]) for r in tested}) == 1
+    assert tested[0]["ci_low"] != tested[0]["ci_high"]
+
+
+def toy_stats(mean_diff=-0.1, p_holm=0.001, **patterns):
+    """Dice stats rows of all tested patterns, with overrides by name like TC_7=(0.1, 0.001)."""
+    rows = []
+    for g in REGIONS:
+        for p in analyse.TESTED:
+            diff, holm = patterns.get(f"{g}_{p}", (mean_diff, p_holm))
+            rows.append({"metric": "dice", "region": g, "pattern_id": p, "mean_diff": diff,
+                         "p_holm": holm})
+    return rows
+
+
+def toy_friedman(**p_holm):
+    return [{"metric": "dice", "region": g, "n_missing": k, "p_holm": p_holm.get(g, 1.2e-05)}
+            for g in REGIONS for k in (1, 2, 3)]
+
+
+# covers: AC-13
+def test_verdict_all_supported_is_the_exact_template():
+    assert analyse.verdict(toy_stats(), toy_friedman(), 0.05) == [
+        "H1a WT: supported", "H1a TC: supported", "H1a ET: supported",
+        "H1b WT: supported (n_missing=1, p_holm=1.2e-05)",
+        "H1b TC: supported (n_missing=1, p_holm=1.2e-05)",
+        "H1b ET: supported (n_missing=1, p_holm=1.2e-05)"]
+
+
+# covers: AC-13. One pattern fails on its sign, the other on Holm; IDs ascend whatever the order.
+def test_verdict_names_the_failing_patterns_ascending():
+    stats = toy_stats(TC_12=(-0.1, 0.06), TC_7=(0.02, 0.001))
+    assert analyse.verdict(stats[::-1], toy_friedman(), 0.05)[1] == (
+        "H1a TC: not supported (patterns 7, 12)")
+
+
+# covers: AC-13. A significant change upward is a failure of H1a, because the test is two sided.
+def test_verdict_h1a_reads_the_direction_from_the_sign():
+    assert analyse.verdict(toy_stats(WT_2=(0.05, 0.0001)), toy_friedman(), 0.05)[0] == (
+        "H1a WT: not supported (patterns 2)")
+
+
+# covers: AC-13. Only the n_missing 1 group decides H1b, and the rule is strictly below alpha.
+def test_verdict_h1b_uses_only_group_one_and_is_strict():
+    rows = toy_friedman(ET=0.031)
+    for r in rows:
+        if r["n_missing"] != 1:
+            r["p_holm"] = 0.9
+    assert analyse.verdict(toy_stats(), rows, 0.05)[3] == (
+        "H1b WT: supported (n_missing=1, p_holm=1.2e-05)")
+    assert analyse.verdict(toy_stats(), rows, 0.01)[5] == (
+        "H1b ET: not supported (n_missing=1, p_holm=0.031)")
+    assert analyse.verdict(toy_stats(), toy_friedman(WT=0.05), 0.05)[3] == (
+        "H1b WT: not supported (n_missing=1, p_holm=0.05)")
+
+
+# covers: AC-13. HD95 never decides the verdict.
+def test_verdict_ignores_hd95_rows():
+    bad = [r | {"metric": "hd95_mm", "mean_diff": 1.0, "p_holm": 0.9} for r in toy_stats()]
+    worse = [r | {"metric": "hd95_mm", "p_holm": 0.9} for r in toy_friedman()]
+    good = analyse.verdict(toy_stats(), toy_friedman(), 0.05)
+    assert analyse.verdict(toy_stats() + bad, toy_friedman() + worse, 0.05) == good
+
+
+# covers: AC-13
+def test_analyse_stores_the_printed_verdict(tmp_path, capsys):
+    write_toy_metrics(tmp_path / "metrics.csv")
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    lines = (tmp_path / "verdict.txt").read_text().splitlines()
+    assert len(lines) == 6 and lines[0].startswith("H1a WT: ")
+    assert "\n".join(lines) in capsys.readouterr().out
 
 
 def test_analyse_refuses_a_missing_row(tmp_path):
@@ -275,32 +449,118 @@ def test_analyse_refuses_a_duplicate_row(tmp_path):
         analyse.main(["--eval", str(tmp_path)])
 
 
-def test_dice_table_from_the_analysis(quick_eval, tmp_path):
-    assert make_table.main(["--eval", str(quick_eval), "--out-dir", str(tmp_path)]) == 0
-    tex = (tmp_path / "0004-missing-eval-val-dice.tex").read_text()
-    rec = load_run(quick_eval)
+@pytest.fixture(scope="module")
+def tables(quick_eval, tmp_path_factory):
+    out = tmp_path_factory.mktemp("tables")
+    assert make_table.main(["--eval", str(quick_eval), "--out-dir", str(out)]) == 0
+    return {n: (out / f"0004-missing-eval-val-{n}.tex").read_text() for n in TABLE_NAMES}
+
+
+# covers: AC-14
+@pytest.mark.parametrize("name", TABLE_NAMES)
+def test_each_table_carries_its_provenance_and_val_note(tables, quick_eval, name):
+    tex, rec = tables[name], load_run(quick_eval)
     assert tex.startswith(f"% generated by experiments/0004-missing-eval/make_table.py from run "
                           f"{quick_eval.name}\n")
-    assert rec["config_hash"] in tex and "seed 42" in tex and "n = 2" in tex
-    assert "Development fold, not a test result." in tex
+    assert rec["config_hash"] in tex and rec["git_commit"] in tex and "seed 42" in tex
+    assert "n = 2" in tex and "val fold" in tex
+    assert ("Development fold, not a test result. The checkpoint was chosen on this fold at "
+            "complete input, so pattern 1 is slightly optimistic.") in tex
+
+
+# covers: AC-14
+@pytest.mark.parametrize(("name", "rows"), [("dice", 15), ("hd95", 15), ("marginal", 8)])
+def test_tables_have_the_spec_layout(tables, name, rows):
+    tex = tables[name]
     assert "booktabs" not in tex and r"\toprule" in tex and r"\resizebox{\linewidth}{!}" in tex
-    assert tex.count(r"\\") == 2 + 15
+    assert tex.count(r"\\") == 2 + rows
 
 
-def test_dice_table_star_follows_holm_p_and_the_config_alpha():
-    row = {"mean": "0.8", "mean_diff": "-0.1", "p_holm": "0.04", "ci_low": "", "ci_high": ""}
-    assert make_table.dice_cells(row, 0.05) == ["0.800", "-0.100$^{*}$", "--"]
-    assert make_table.dice_cells(row, 0.01) == ["0.800", "-0.100", "--"]
+# covers: AC-14. The test caption is the spec's, and the val note is gone.
+def test_test_fold_caption(quick_eval, tmp_path):
+    ev = tmp_path / "ev"
+    shutil.copytree(quick_eval, ev)
+    edit_json(ev, fold="test")
+    assert make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)]) == 0
+    for n in TABLE_NAMES:
+        tex = (tmp_path / f"0004-missing-eval-test-{n}.tex").read_text()
+        assert "Test fold, opened once." in tex and "Development fold" not in tex
+
+
+# covers: AC-14
+def test_dice_cells_star_follows_holm_p_and_the_config_alpha():
+    row = {"mean": "0.8", "mean_diff": "-0.1", "p_holm": "0.04", "ci_low": "-0.12",
+           "ci_high": "-0.08"}
+    assert make_table.dice_cells(row, 0.05) == ["0.800", "-0.100$^{*}$", "[-0.120, -0.080]"]
+    assert make_table.dice_cells(row, 0.01) == ["0.800", "-0.100", "[-0.120, -0.080]"]
     assert make_table.dice_cells(row | {"mean_diff": "", "p_holm": ""}, 0.05) == ["0.800", "--", "--"]
 
 
-def test_dice_table_refuses_a_wrong_row_count(quick_eval, tmp_path):
+# covers: AC-14. HD95 leads with the median, 1 decimal, and pattern 1 has no star.
+def test_hd95_cells():
+    row = {"median": "12.34", "mean": "20.06", "n_pred_empty": "3", "p_holm": "0.01"}
+    assert make_table.hd95_cells(row, 0.05) == ["12.3$^{*}$", "20.1", "3"]
+    assert make_table.hd95_cells(row | {"p_holm": ""}, 0.05) == ["12.3", "20.1", "3"]
+
+
+# covers: AC-14. The table comes from the analysis CSV, cell by cell.
+def test_marginal_table_reads_the_analysis(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv",
+                      dice=lambda i, p: 0.5 + 0.1 * ("T1" in PATTERNS[p].present))
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    tex = make_table.marginal_table(make_table.read_marginal(tmp_path),
+                                    make_table.read_stats(tmp_path),
+                                    {"fold": "val", "seed": 42, "eval_id": "x", "config_hash": "c",
+                                     "git_commit": "g"})
+    t1 = next(line for line in tex.splitlines() if line.startswith("Dice & T1 &"))
+    assert t1.count("0.100 & [0.100, 0.100]") == 3
+
+
+# covers: AC-14. 15 x 3 cells in scan order, pattern 1 at 0, greyscale, scale from the lowest to 0.
+def test_heatmap_cells_and_scale(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv", dice=lambda i, p: 0.9 - 0.02 * (p - 1))
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    tex = make_table.heatmap(make_table.read_stats(tmp_path),
+                             {"fold": "val", "seed": 42, "eval_id": "x", "config_hash": "c",
+                              "git_commit": "g"})
+    lines = tex.splitlines()
+    start = next(i for i, x in enumerate(lines) if "meta index=2" in x) + 1
+    cells = [x.split() for x in lines[start:start + 45]]
+    assert lines[start + 45] == "};"
+    assert [c[:2] for c in cells] == [[str(x), str(y)] for y in range(15) for x in range(3)]
+    assert cells[0][2] == "0.000000" and cells[-1][2] == "-0.280000"
+    assert "point meta min=-0.280000, point meta max=0" in tex
+    assert "matrix plot*" in tex and "gray(0cm)" in tex and "nodes near coords=" in tex
+
+
+# covers: AC-14
+def test_stub_inputs_the_four_files():
+    tex = (REPO / "writing" / "tracer" / "e2-preview.tex").read_text()
+    for n in TABLE_NAMES:
+        assert rf"\input{{../tables/0004-missing-eval-val-{n}.tex}}" in tex
+    for package in ("fontspec", "booktabs", "graphicx", "pgfplots"):
+        assert rf"\usepackage{{{package}}}" in tex
+    assert r"\pgfplotsset{compat=1.18}" in tex
+
+
+# covers: AC-14
+@pytest.mark.parametrize(("name", "message"), [("stats.csv", "89 rows in stats.csv"),
+                                               ("marginal.csv", "23 rows in marginal.csv")])
+def test_tables_refuse_a_wrong_row_count(quick_eval, tmp_path, name, message):
     shutil.copytree(quick_eval, tmp_path / "ev")
-    path = tmp_path / "ev" / "stats.csv"
+    path = tmp_path / "ev" / name
     path.write_text("".join(path.read_text().splitlines(keepends=True)[:-1]))
-    with pytest.raises(SystemExit, match="44 Dice rows"):
+    with pytest.raises(SystemExit, match=message):
         make_table.main(["--eval", str(tmp_path / "ev"), "--out-dir", str(tmp_path)])
 
+
+# covers: AC-14
+@pytest.mark.parametrize("name", ["stats.csv", "marginal.csv"])
+def test_tables_refuse_a_missing_csv(quick_eval, tmp_path, name):
+    shutil.copytree(quick_eval, tmp_path / "ev")
+    (tmp_path / "ev" / name).unlink()
+    with pytest.raises(SystemExit, match="missing"):
+        make_table.main(["--eval", str(tmp_path / "ev"), "--out-dir", str(tmp_path)])
 
 @pytest.fixture(scope="module")
 def val_eval(e1_run, tmp_path_factory):
@@ -731,3 +991,38 @@ def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys):
     assert "finished" in capsys.readouterr().out
     assert run_test(run, out, "--open-test", "--rerun-reason", "synthetic") == 0
     assert load_run(folder)["rerun_reason"] == "synthetic"
+
+
+# covers: AC-16. source_run in run.json is the default, and a passing val prints the projection.
+def test_check_eval_passes_and_projects_the_test_time(val_eval, capsys):
+    assert check_eval.main([str(val_eval)]) == 0
+    out = capsys.readouterr().out
+    rec = load_run(val_eval)
+    hours = (rec["predict_seconds"] + rec["metric_seconds"]) * 2 / 3600
+    assert out.startswith("PASS: ") and f"Projected test time: {hours:.2f} hours" in out
+
+
+# covers: AC-16. --run replaces a stale source_run, as after a move between machines.
+def test_check_eval_run_flag_beats_a_moved_source(val_eval, e1_run, tmp_path):
+    ev = tmp_path / "ev"
+    shutil.copytree(val_eval, ev)
+    edit_json(ev, source_run=str(tmp_path / "gone"))
+    assert check_eval.main([str(ev)]) == 1
+    assert check_eval.main([str(ev), "--run", str(e1_run)]) == 0
+
+
+# covers: AC-16. Each reason is printed, and no projection comes from a failed folder.
+def test_check_eval_prints_each_failure_and_exits_1(val_eval, e1_run, tmp_path, capsys):
+    ev = tmp_path / "ev"
+    shutil.copytree(val_eval, ev)
+    edit_json(ev, status="failed", quick=True)
+    assert check_eval.main([str(ev), "--run", str(e1_run)]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL: status is 'failed'" in out and "FAIL: a quick run" in out
+    assert "PASS" not in out and "Projected" not in out
+
+
+# covers: AC-16
+def test_check_eval_stops_on_a_folder_with_no_record(tmp_path, capsys):
+    assert check_eval.main([str(tmp_path)]) == 1
+    assert "run.json missing" in capsys.readouterr().out

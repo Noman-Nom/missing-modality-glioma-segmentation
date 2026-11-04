@@ -4,7 +4,7 @@ The tests are paired over subjects. Every rule here is the one in the spec, so E
 scored by the same code. SciPy has no Holm function and statsmodels is not in uv.lock.
 """
 import numpy as np
-from scipy.stats import wilcoxon
+from scipy.stats import friedmanchisquare, wilcoxon
 
 
 def paired_wilcoxon(d):
@@ -28,3 +28,30 @@ def holm(p):
     out = np.empty(len(p))
     out[order] = adjusted
     return out
+
+
+def friedman(matrix):
+    """Friedman test on an n x k matrix (n subjects, k patterns). Returns (stat, p, kendall_w).
+
+    Kendall W = stat / (n (k - 1)), an effect size from 0 to 1. All rows fully tied would give NaN
+    in SciPy, so that case is coded as statistic 0, p 1, W 0.
+    """
+    m = np.asarray(matrix, dtype=float)
+    n, k = m.shape
+    if (m == m[:, :1]).all():
+        return 0.0, 1.0, 0.0
+    r = friedmanchisquare(*m.T)
+    return float(r.statistic), float(r.pvalue), float(r.statistic) / (n * (k - 1))
+
+
+def bootstrap_indices(n, resamples, seed):
+    """One integer index matrix (resamples, n). Reused for every row, so all rows are paired."""
+    return np.random.default_rng(seed).integers(0, n, size=(resamples, n))
+
+
+def bootstrap_ci(values, indices, level=0.95):
+    """Percentile bootstrap CI of the mean of values, over the subjects. Returns (low, high)."""
+    means = np.asarray(values, dtype=float)[indices].mean(axis=1)
+    tail = (100 - 100 * level) / 2
+    low, high = np.percentile(means, [tail, 100 - tail])
+    return float(low), float(high)

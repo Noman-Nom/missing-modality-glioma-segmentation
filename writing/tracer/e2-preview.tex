@@ -1,0 +1,23 @@
+% E2 preview stub (spec 0004, AC-14). Proves the four generated files build in XeLaTeX.
+% Run analyse.py and make_table.py first, then: cd writing/tracer && latexmk -xelatex e2-preview.tex
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2cm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\begin{document}
+
+\section*{E2 preview}
+
+This page only shows that the generated files build in the thesis toolchain.
+
+\input{../tables/0004-missing-eval-val-dice.tex}
+\input{../tables/0004-missing-eval-val-hd95.tex}
+\input{../tables/0004-missing-eval-val-marginal.tex}
+\input{../tables/0004-missing-eval-val-heatmap.tex}
+
+\end{document}
