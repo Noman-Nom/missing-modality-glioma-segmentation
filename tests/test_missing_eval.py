@@ -21,7 +21,7 @@ from common.evaluation import (
     protocol_hash,
 )
 from common.missing import PATTERNS
-from common.runlog import dump_config, load_config, load_run
+from common.runlog import RunRecord, dump_config, load_config, load_run
 from conftest import only_run, write_case, write_splits
 from scipy.stats import chi2
 
@@ -542,6 +542,15 @@ def test_a_refusal_leaves_older_output_files_byte_equal(tmp_path):
 
 
 # covers: AC-12, AC-15. The quick_eval fixture runs analyse.py, and a quick run has to pass.
+# covers: AC-12. The three named files are enough, so nothing else can feed the analysis.
+def test_analyse_reads_only_its_three_files(quick_eval, tmp_path):
+    for name in ("metrics.csv", "config.toml", "run.json"):
+        shutil.copy(quick_eval / name, tmp_path / name)
+    assert analyse.main(["--eval", str(tmp_path)]) == 0
+    for name in ANALYSIS_FILES:
+        assert (tmp_path / name).read_bytes() == (quick_eval / name).read_bytes()
+
+
 def test_analyse_accepts_a_quick_run_with_status_ok(quick_eval):
     rec = load_run(quick_eval)
     assert (rec["quick"], rec["status"], rec["n_cases"]) == (True, "ok", 2)
@@ -601,6 +610,22 @@ def test_dice_cells_star_follows_holm_p_and_the_config_alpha():
     assert make_table.dice_cells(row, 0.05) == ["0.800", "-0.100$^{*}$", "[-0.120, -0.080]"]
     assert make_table.dice_cells(row, 0.01) == ["0.800", "-0.100", "[-0.120, -0.080]"]
     assert make_table.dice_cells(row | {"mean_diff": "", "p_holm": ""}, 0.05) == ["0.800", "--", "--"]
+
+
+# covers: AC-14. A p value equal to alpha is not below it, the same strict rule as the verdict.
+def test_star_needs_p_strictly_below_alpha():
+    assert make_table.star({"p_holm": "0.05"}, 0.05) == ""
+    assert make_table.star({"p_holm": "0.0499"}, 0.05) == make_table.STAR
+
+
+# covers: AC-14. The tables read the analysis CSVs, never the raw metrics.
+def test_tables_do_not_need_metrics_csv(quick_eval, tmp_path, tables):
+    ev = tmp_path / "ev"
+    shutil.copytree(quick_eval, ev)
+    (ev / "metrics.csv").unlink()
+    assert make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)]) == 0
+    for name in TABLE_NAMES:
+        assert (tmp_path / f"0004-missing-eval-val-{name}.tex").read_text() == tables[name]
 
 
 # covers: AC-14. Through main: the star comes from alpha in the eval folder's config.toml. 3 toy
@@ -981,6 +1006,32 @@ def test_resume_records_the_entry_and_adds_up_the_timings(e1_run, tmp_path, monk
     assert rec["peak_vram_reserved_mib"] == 123.0
 
 
+# covers: AC-5. On a GPU the peak of the new session is lower or higher than the old one, and the
+# record keeps the larger. The CPU path never reaches this branch, so the fake device does.
+@pytest.mark.parametrize(("old", "now", "kept"), [(None, 50.0, 50.0), (123.0, 50.0, 123.0),
+                                                  (123.0, 200.0, 200.0)])
+def test_peak_vram_keeps_the_maximum_across_sessions(tmp_path, monkeypatch, old, now, kept):
+    monkeypatch.setattr(evaluate.torch.cuda, "max_memory_reserved", lambda: now * 2**20)
+    run = RunRecord(tmp_path, keys=EVAL_RUN_KEYS, peak_vram_reserved_mib=old,
+                    **dict.fromkeys(evaluate.COUNTERS, 0.0))
+    record = evaluate.progress_recorder(run, torch.device("cuda"))
+    record({"predict_seconds": 1.0, "metric_seconds": 1.0})
+    assert load_run(tmp_path)["peak_vram_reserved_mib"] == kept
+
+
+# covers: AC-5. A dead Kaggle session comes back with the input and output at new paths. Paths
+# are not resume keys, so this must resume, and the result must equal an uninterrupted run.
+def test_resume_survives_the_run_and_the_output_moving(e1_run, quick_eval, tmp_path, monkeypatch):
+    folder = stop_after(e1_run, tmp_path / "first", 7, monkeypatch)
+    moved_run = tmp_path / "input" / e1_run.name
+    shutil.copytree(e1_run, moved_run)
+    out = tmp_path / "working"
+    shutil.copytree(folder, out / folder.name)
+    assert run_eval(moved_run, out, "--quick") == 0
+    assert load_run(out / folder.name)["status"] == "ok"
+    assert (out / folder.name / "metrics.csv").read_bytes() == (quick_eval / "metrics.csv").read_bytes()
+
+
 def test_a_second_stop_keeps_the_first_entry_and_the_time(e1_run, quick_eval, tmp_path, monkeypatch):
     folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
     first = load_run(folder)["predict_seconds"]
@@ -1082,6 +1133,15 @@ def test_rules_refuse_a_nan_row(broken):
     ev, run = broken
     edit_csv(ev / "metrics.csv", lambda rows: rows[0].update(hd95_mm="nan"))
     assert any("no Dice or HD95" in e for e in check_rules(ev, run))
+
+
+# covers: AC-9, AC-16. No case scored is not "every case present": the case set is not E1's, and
+# the gate must not open on it. n_cases is cut too, so the row count alone cannot see it.
+def test_rules_refuse_an_eval_that_scored_no_case(broken):
+    ev, run = broken
+    (ev / "metrics.csv").write_text(",".join(METRIC_COLUMNS) + "\n")
+    edit_json(ev, n_cases=0)
+    assert any("case set differs from E1" in e for e in check_rules(ev, run))
 
 
 def test_rules_refuse_missing_metrics_files(broken):
@@ -1219,6 +1279,26 @@ def test_gate_prints_every_failed_rule(gate, capsys):
         assert message in printed
 
 
+# covers: AC-7. The hash seals experiments/0004-missing-eval/config.toml, so a --config file with
+# another alpha or case list must not walk around the seal. The fixture fails on any test read.
+def test_gate_refuses_a_config_outside_the_seal(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    cfg = load_config(E2 / "config.toml")
+    other = tmp_path / "other.toml"
+    dump_config(cfg | {"eval": cfg["eval"] | {"alpha": 0.5}}, other)
+    assert_refused(run, out, "config_hash differs", capsys, "--open-test", "--config", str(other))
+
+
+# covers: AC-7. The rule is on content, not on the path: a copy of the config val used still opens.
+def test_gate_opens_with_a_copy_of_the_config_val_used(gate, tmp_path):
+    out, _, run, monkeypatch = gate
+    monkeypatch.undo()
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    copy = tmp_path / "copy.toml"
+    shutil.copy(E2 / "config.toml", copy)
+    assert run_test(run, out, "--open-test", "--config", str(copy)) == 0
+
+
 def test_gate_refuses_open_test_on_val(gate, capsys):
     out, _, run, _ = gate
     assert evaluate.main(["--run", str(run), "--fold", "val", "--out", str(out), "--device", "cpu",
@@ -1257,6 +1337,12 @@ def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys):
     edit_json(out / f"{e1_run.name}-val", protocol_hash="old")
     assert any("protocol_hash differs" in e for e in check_rules(folder, run))
     edit_json(out / f"{e1_run.name}-val", protocol_hash=protocol_hash())
+
+    # a finished test eval under another config is caught after the fact too
+    hash_of_val = load_run(out / f"{e1_run.name}-val")["config_hash"]
+    edit_json(out / f"{e1_run.name}-val", config_hash="old")
+    assert any("config_hash differs" in e for e in check_rules(folder, run))
+    edit_json(out / f"{e1_run.name}-val", config_hash=hash_of_val)
     assert run_test(run, out, "--open-test") == 2  # one finished run (AC-6)
     assert "finished" in capsys.readouterr().out
     assert run_test(run, out, "--open-test", "--rerun-reason", "synthetic") == 0
@@ -1270,6 +1356,45 @@ def test_check_eval_passes_and_projects_the_test_time(val_eval, capsys):
     rec = load_run(val_eval)
     hours = (rec["predict_seconds"] + rec["metric_seconds"]) * 2 / 3600
     assert out.startswith("PASS: ") and f"Projected test time: {hours:.2f} hours" in out
+
+
+# covers: AC-7. The rule is "the config val used", not "the default file": a val eval under
+# another --config needs that same config on test, and the default is then the one refused.
+def test_gate_follows_the_config_val_used(gate, e1_run, tmp_path, capsys):
+    out, _, run, monkeypatch = gate
+    monkeypatch.undo()
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    cfg = load_config(E2 / "config.toml")
+    other = tmp_path / "other.toml"
+    dump_config(cfg | {"eval": cfg["eval"] | {"alpha": 0.5}}, other)
+    assert run_eval(run, out, "--config", str(other), "--rerun-reason", "another alpha") == 0
+    assert_refused(run, out, "config_hash differs", capsys, "--open-test")
+    assert run_test(run, out, "--open-test", "--config", str(other)) == 0
+
+
+# covers: AC-16. The test fold side of the empty eval rule: its case list is compared too, so a
+# test eval cut to nothing, n_cases included, is not a finished test eval.
+def test_rules_refuse_a_test_eval_that_scored_no_case(gate, e1_run):
+    out, _, run, monkeypatch = gate
+    monkeypatch.undo()
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    assert run_test(run, out, "--open-test") == 0
+    folder = out / f"{e1_run.name}-test"
+    (folder / "metrics.csv").write_text(",".join(METRIC_COLUMNS) + "\n")
+    edit_json(folder, n_cases=0)
+    assert check_rules(folder, run) == ["case set differs from the test fold: 2 missing, 0 extra"]
+
+
+# covers: AC-16. The projection is for a val eval; a finished test eval has nothing to project.
+def test_check_eval_prints_no_projection_on_test(gate, e1_run, capsys):
+    out, _, run, monkeypatch = gate
+    monkeypatch.undo()
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    assert run_test(run, out, "--open-test") == 0
+    capsys.readouterr()
+    assert check_eval.main([str(out / f"{e1_run.name}-test"), "--run", str(run)]) == 0
+    printed = capsys.readouterr().out
+    assert printed.startswith("PASS: ") and "Projected" not in printed
 
 
 # covers: AC-16. --run replaces a stale source_run, as after a move between machines.

@@ -89,9 +89,11 @@ def main(argv=None):
     rec = load_run(a.run)
     commit, dirty = git_info()
     protocol = protocol_hash()
+    eval_cfg = {**load_config(a.config)["eval"], "quick": a.quick}
+    saved = {"eval": eval_cfg}
     # first, before any case list or .npz (AC-7)
     errors = check_test_gate(a.fold, a.open_test, a.quick, rec, (commit, dirty),
-                             a.out / f"{rec['run_id']}-val", a.run, protocol)
+                             a.out / f"{rec['run_id']}-val", a.run, protocol, config_hash(saved))
     if errors:
         print("ERROR: test gate, nothing read:\n" + "\n".join("  " + e for e in errors))
         return 2
@@ -110,7 +112,6 @@ def main(argv=None):
         return 1
 
     cfg = load_config(a.run / "config.toml")
-    eval_cfg = {**load_config(a.config)["eval"], "quick": a.quick}
     try:
         cases = eval_cases(cfg, eval_cfg, rec, a.fold)
     except GuardError as e:
@@ -125,7 +126,6 @@ def main(argv=None):
 
     eval_id = f"{rec['run_id']}-{a.fold}" + ("-quick" if a.quick else "")
     eval_dir = a.out / eval_id
-    saved = {"eval": eval_cfg}
     device = torch.device("cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu")
     fields = {
         "eval_id": eval_id, "quick": a.quick, "fold": a.fold, "n_cases": len(cases),

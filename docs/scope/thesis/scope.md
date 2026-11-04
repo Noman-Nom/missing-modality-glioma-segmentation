@@ -133,7 +133,7 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
   - [x] Review fixes: test fold case set, resume on `device` and `gpu`, star caption, table guards, sealed `predict()` (AC-5, AC-14, AC-16, AC-20)
   - [ ] Human run: val sweep on the Kaggle T4, analyse, tables, check (AC-18)
 - [ ] Verify it: /check verify E2 missing modality evaluation
-- [ ] Test it: /test E2 missing modality evaluation
+- [x] Test it: /test E2 missing modality evaluation
 - [x] Review it (fresh model): /check review E2 missing modality evaluation
 - [ ] Document it: /document E2 missing modality evaluation
 

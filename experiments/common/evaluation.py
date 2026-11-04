@@ -253,7 +253,6 @@ def check_rules(eval_dir, source_run):
     nans = sum(1 for r in rows if _nan(r["dice"]) or _nan(r["hd95_mm"]))
     if nans:
         errors.append(f"{nans} row(s) with no Dice or HD95")
-    if nans or not rows:
         return errors
     if rec["fold"] == "val":
         errors += _tie_out(rec, rows, source_run)
@@ -262,16 +261,20 @@ def check_rules(eval_dir, source_run):
         val_dir = eval_dir.parent / f"{rec['source_run_id']}-val"
         if not (val_dir / "run.json").is_file():
             errors.append(f"{val_dir} missing, no protocol_hash to compare")
-        elif load_run(val_dir)["protocol_hash"] != rec["protocol_hash"]:
-            errors.append("protocol_hash differs from the val eval's")
+        else:
+            val = load_run(val_dir)
+            errors += [f"{k} differs from the val eval's" for k in ("protocol_hash", "config_hash")
+                       if val[k] != rec[k]]
     return errors
 
 
-def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol):
+def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol, config):
     """Every failed rule of the test gate (AC-7), as error strings. Empty means the gate is open.
 
-    rec is the E1 run.json and git is (commit, dirty) from git_info(). It takes plain values, so
-    E3 and E4 can reuse it. It reads no case. It stops accidents; it is not proof of one opening.
+    rec is the E1 run.json and git is (commit, dirty) from git_info(). config is the config_hash
+    of this run: protocol seals only the default config.toml, so --config needs its own check. It
+    takes plain values, so E3 and E4 can reuse it. It reads no case. It stops accidents; it is not
+    proof of one opening.
     """
     if fold != "test":
         return ["--open-test is only for --fold test"] if open_test else []
@@ -288,8 +291,11 @@ def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol
     if not (val_dir / "run.json").is_file():
         return errors + [f"{val_dir} missing: finish the val eval first"]
     errors += [f"val eval: {e}" for e in check_rules(val_dir, run_dir)]
-    if load_run(val_dir)["protocol_hash"] != protocol:
+    val = load_run(val_dir)
+    if val["protocol_hash"] != protocol:
         errors.append("protocol_hash differs from the val eval's: rerun val with --rerun-reason")
+    if val["config_hash"] != config:
+        errors.append("config_hash differs from the val eval's: use the config val used")
     return errors
 
 

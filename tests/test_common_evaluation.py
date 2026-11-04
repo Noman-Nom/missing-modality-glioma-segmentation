@@ -18,6 +18,7 @@ from common.evaluation import (
     metrics_writer,
     sweep,
 )
+from common.metrics import HD95_EMPTY_MM
 from common.missing import PATTERNS
 from common.runlog import load_config
 
@@ -34,6 +35,13 @@ class Everywhere(torch.nn.Module):
 
     def forward(self, x):
         return torch.full((x.shape[0], 3, *x.shape[2:]), 5.0)
+
+
+class Nowhere(torch.nn.Module):
+    """Predicts no voxel of any region, as a model can when a key modality is zeroed."""
+
+    def forward(self, x):
+        return torch.full((x.shape[0], 3, *x.shape[2:]), -5.0)
 
 
 @pytest.fixture
@@ -158,6 +166,69 @@ def test_image_hook_output_is_what_the_model_sees(cached):
     sweep(Spy(), VAL[:1], cfg, torch.device("cpu"), lambda rows: None, patterns=[1],
           image_hook=lambda image, p: image * 0 + 7)
     assert sizes and set(sizes) == {7.0}
+
+
+def rewrite_label(cdir, case, label):
+    """The same cached case with another label, so one region can have no truth."""
+    write_case(cdir, case, np.zeros((4, 8, 8, 8), np.float32), label, (1.0, 1.0, 1.0),
+               ((0, 8), (0, 8), (0, 8)))
+
+
+# covers: AC-3. An empty prediction is a score under the empty region rule, not a NaN. Stopping
+# here would end the real sweep at its first bad pattern.
+def test_sweep_scores_an_empty_prediction_and_keeps_going(cached):
+    cfg, _ = cached
+    got = []
+    sweep(Nowhere(), VAL, cfg, torch.device("cpu"), got.append)
+    assert len(got) == 2 * 15
+    for r in (row for rows in got for row in rows):
+        assert (r["dice"], r["hd95_mm"], r["pred_empty"]) == (0.0, HD95_EMPTY_MM, True)
+        assert math.isnan(r["precision"]) and r["sensitivity"] == 0.0
+
+
+# covers: AC-3. BraTS has cases with no enhancing tumour: truth empty, prediction not.
+def test_sweep_scores_a_region_with_no_truth(cached):
+    cfg, cdir = cached
+    label = np.zeros((8, 8, 8), np.uint8)
+    label[2:5, 2:5, 2:5] = 2  # label 2 is in WT only, so TC and ET have no truth
+    rewrite_label(cdir, VAL[0], label)
+    got = []
+    sweep(Everywhere(), VAL[:1], cfg, torch.device("cpu"), got.append, patterns=[1])
+    wt, tc, et = got[0]
+    assert wt["gt_empty"] is False and wt["hd95_mm"] < HD95_EMPTY_MM
+    for r in (tc, et):
+        assert (r["dice"], r["hd95_mm"], r["gt_empty"]) == (0.0, HD95_EMPTY_MM, True)
+        assert math.isnan(r["sensitivity"]) and r["precision"] == 0.0
+
+
+# covers: AC-3. Empty truth and empty prediction agree, so the score is perfect.
+def test_sweep_scores_both_empty_as_a_perfect_region(cached):
+    cfg, cdir = cached
+    rewrite_label(cdir, VAL[0], np.zeros((8, 8, 8), np.uint8))
+    got = []
+    sweep(Nowhere(), VAL[:1], cfg, torch.device("cpu"), got.append, patterns=[1])
+    assert [(r["dice"], r["hd95_mm"]) for r in got[0]] == [(1.0, 0.0)] * 3
+
+
+# covers: AC-3, AC-5. The blank precision of an empty prediction must not make a resume cut a
+# good pair: a real sweep has many of these rows.
+def test_rows_with_blank_fields_survive_a_resume_clean(cached, tmp_path):
+    cfg, _ = cached
+    path = tmp_path / "m.csv"
+    with open(path, "a", newline="") as f:
+        sweep(Nowhere(), VAL, cfg, torch.device("cpu"), metrics_writer(f, "e"))
+    whole = path.read_bytes()
+    assert clean_metrics(path) == {(c, p) for c in VAL for p in range(1, 16)}
+    assert path.read_bytes() == whole
+
+
+# covers: AC-3, AC-4. E3 and E4 pass a subset, and the order given must not change the order
+# written, or two strategies would not line up.
+def test_sweep_scores_a_pattern_subset_ascending(cached):
+    cfg, _ = cached
+    got = []
+    sweep(Everywhere(), VAL[:1], cfg, torch.device("cpu"), got.append, patterns=[9, 1, 4])
+    assert [rows[0]["pattern_id"] for rows in got] == [1, 4, 9]
 
 
 # covers: AC-3. Only pairs not in done are scored, and a finished case is not opened.
