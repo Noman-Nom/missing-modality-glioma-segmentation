@@ -13,6 +13,7 @@ Python 3, PyTorch, MONAI, NiBabel, NumPy, SciPy, pandas. 4 GB GPU: patch trainin
 - `common/seed.py` one function that sets all seeds
 - `common/model.py` the compact 3D U-Net and sliding window prediction
 - `common/runlog.py` config loading, config hash, git and version info, `run.json`
+- `common/training.py` the shared training loop, val, checkpoints, resume and failure handling; E3 and E4 reuse it through `batch_hook` and `val_patterns`. At a val point the `train_log.csv` row is flushed before `last.pt`, so every `last.pt` stays resumable
 - `NNNN-name/config.toml` one config per experiment
 
 ## Commands
@@ -42,7 +43,8 @@ Folder numbers are build order. E numbers (E0 to E7, defined in `context/project
 |---|---|---|
 | E0 | Data inspection | `0000-data-audit` |
 | E1 | Complete input baseline | `0003-baseline` |
-| E2 to E7 | Missing modality evaluation, strategies, extensions | folder added here when built |
+| E2 | Missing modality evaluation | `0004-missing-eval` |
+| E3 to E7 | Strategies, extensions | folder added here when built |
 | none | Infrastructure: subject level split | `0001-splits` |
 | none | Infrastructure: tracer bullet | `0002-tracer-bullet` |
 

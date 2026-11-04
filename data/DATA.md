@@ -41,6 +41,13 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 - **Left out.** The two stray folders `BraTS-GLI-00011-000/BraTS-GLI-00011-000-t1n.nii/` and `BraTS-GLI-00014-000/BraTS-GLI-00014-000-t2w.nii/`. They hold one raw `.nii` each and are not read by any script. The official zip from Synapse does not contain them (7507 entries, against 7511 in the local folder), so they were most likely made by an earlier local unpack.
 - **Terms.** The BraTS 2023 terms above are still "to confirm". Confirm that they allow a private copy on Kaggle before the thesis is submitted.
 
+## E1 model on Kaggle (for E2, ADR 0002)
+
+- **Where.** Private Kaggle dataset `muhammadnomanned/brats-e1-run`. To create: not uploaded yet (2026-11-04), the steps are in `experiments/0004-missing-eval/KAGGLE.md`. Never make it public.
+- **What.** One file, `e1-run.tar.bin`, 51,599,360 bytes: an uncompressed tar of `config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` from run `20261103-023817-f9b3afb6`. SHA256 of `best.pt`: `975f56a148af15c01714f397aa4f248f518adda11d55e0de8f8155517d521a58`.
+- **Why a tar.** It keeps the `checkpoints/` folder, and stops Kaggle from touching the files on upload, the same reason as the BraTS tar above.
+- **What it holds.** Model weights and case IDs with their scores, no images. The weights were trained on BraTS data, so the BraTS terms still to confirm above apply here too.
+
 ## Splits (experiment 0001)
 
 `data/splits/splits.csv` (committed, IDs only). It holds all 1251 labelled training cases (`N_LABELLED_CASES` in `check_splits.py`). Seed 42, subject level, stratified by subject WT-volume tertile x any-empty-ET. The 219 official validation cases have no labels and are not used for scores.

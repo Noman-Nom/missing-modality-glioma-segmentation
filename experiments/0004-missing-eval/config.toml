@@ -1,0 +1,6 @@
+# E2 missing modality evaluation (spec 0004). Model, [infer], [data] come from the E1 run, never here.
+[eval]
+seed = 42
+test_timepoints = [0]
+bootstrap_resamples = 10000
+alpha = 0.05

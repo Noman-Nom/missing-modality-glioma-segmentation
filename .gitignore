@@ -37,6 +37,7 @@ results/*
 # generated tables, rebuilt from results/ by make_table.py
 writing/tables/
 writing/tracer/tracer.pdf
+writing/tracer/e2-preview.pdf
 
 # python
 __pycache__/

@@ -19,7 +19,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 3  | Subject-level split and leakage test                 | Slice 2    | done    |
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | done |
-| 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | planned |
+| 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | in-progress |
 | 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | planned |
 | 8  | Reduced-label study (E5), optional                   | Slice 5    | planned |
 | 9  | Self-supervised pilot (E6), optional                 | Slice 5    | planned |
@@ -118,17 +118,30 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
 - [x] Verify it: /check verify E1 complete-input baseline
 - [x] Test it: /test E1 complete-input baseline
 
-### 6. Missing-modality evaluation, 15 patterns (E2) · needs a decision · GA (planned)
-Measure how the baseline degrades under every one of the 15 non empty modality subsets (RQ1).
-Done when: every pattern is scored per region (Dice, HD95) on the same subjects, the protocol is fixed before any test fold number is seen, and the table comes from a script.
+### 6. Missing-modality evaluation, 15 patterns (E2) · GA (in-progress)
+Measure how the baseline degrades under every one of the 15 non empty modality subsets (RQ1). Spec: [0004](../../specs/thesis/0004-missing-modality-evaluation/index.md).
+Done when: every pattern is scored per region (Dice, HD95) on the same val subjects, the test path is proven on synthetic cases with the real test fold still sealed, the protocol is fixed before any test fold number is seen, and the tables come from a script.
+Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-missing-eval/`.
 
-- [ ] Design it (spec): /architect missing modality evaluation
+- [x] Design it (spec): /architect missing modality evaluation
+- [ ] Build it: /develop E2 missing modality evaluation
+  - [x] Thin thread: `common/evaluation.py`, `evaluate.py`, Wilcoxon and Holm, Dice table, quick run on synthetic cases (AC-1, AC-2, AC-3, AC-4, AC-15)
+  - [x] Robust sweep: run record, one finished run rule, resume, test gate proven on synthetic cases (AC-5, AC-6, AC-7, AC-8, AC-10)
+  - [x] Full statistics and outputs: HD95, Friedman, marginal, bootstrap, verdict, tables, heatmap, `check_eval.py` with the tie out (AC-9, AC-11, AC-12, AC-13, AC-14, AC-16)
+  - [x] Analysis guards: `analyse.py` refuses a status that is not `ok` and a case count that differs from `n_cases`, toy fixtures, star follows `alpha` (AC-12, AC-14)
+  - [x] Records: `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, scope rewording (AC-17, AC-19)
+  - [x] Review fixes: test fold case set, resume on `device` and `gpu`, star caption, table guards, sealed `predict()` (AC-5, AC-14, AC-16, AC-20)
+  - [ ] Human run: val sweep on the Kaggle T4, analyse, tables, check (AC-18)
+- [ ] Verify it: /check verify E2 missing modality evaluation
+- [x] Test it: /test E2 missing modality evaluation
+- [x] Review it (fresh model): /check review E2 missing modality evaluation
+- [ ] Document it: /document E2 missing modality evaluation
 
 ## Slice 4: Strategies
 
 ### 7. Modality dropout (E3) and presence indicator (E4) · needs a decision · GA (planned)
 Compare simple robustness strategies against zero fill, on the same subjects, splits, metrics and seeds (RQ2).
-Done when: each strategy is trained and evaluated on all 15 patterns, and any claimed benefit rests on a paired comparison.
+Done when: each strategy is trained and evaluated on all 15 patterns, any claimed benefit rests on a paired comparison, and the single joint test opening of E1, E3 and E4 has run (this feature owns it, through the sealed test path of E2).
 
 - [ ] Design it (spec): /architect modality dropout and presence indicator
 
