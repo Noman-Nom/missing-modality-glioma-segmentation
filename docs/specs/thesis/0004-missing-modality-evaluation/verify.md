@@ -21,6 +21,7 @@ Expected: all pass, `slow` deselected, ruff clean. Tests live in `tests/test_com
 | AC-6 | Finished folder refused; with a reason the old folder is renamed and logged |
 | AC-7 | One test per refused condition (including `git_dirty` of `None` and a changed `protocol_hash`), each proving no `.npz` was opened; one passing path with `git_info` patched |
 | AC-9, AC-16 | Toy eval folders, one rule broken at a time: GPU differs, mean off by 0.002, one case off by 0.02, each refused; the projected hours printed on val |
+| AC-16 | A finished synthetic test eval with `metrics.csv` and `n_cases` both cut to one case: `check_rules` reports `case set differs from the test fold`, and a test subject shared with train is reported, not raised (`test_gate_open_scores_the_synthetic_test_fold_once`) |
 | AC-10 | Exact `run.json` key set; an injected exception gives `failed` and a `reason` |
 | AC-11 | Toy cases with known answers, including fully tied Friedman rows giving statistic 0, p 1, W 0 |
 | AC-12 | Row counts (90, 18, 24), a missing row refused, two runs byte identical; a toy case where `marginal.csv` gives a known matched pair answer; refused with exit 1 and no output file: `run.json` missing, each status that is not `ok`, `status` or `n_cases` absent or null, a sweep stopped between two cases, and fewer cases than `n_cases` under status `ok`; a refusal leaves an older output file byte equal; a quick run with status `ok` accepted |

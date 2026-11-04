@@ -140,13 +140,13 @@ def main(argv=None):
     metrics = eval_dir / "metrics.csv"
     try:
         old, superseded = prepare_folder(eval_dir, fields, reason)
-        done = clean_metrics(metrics) if old else set()
+        done = clean_metrics(metrics) if old is not None else set()
     except GuardError as e:
         print(f"ERROR: {e}; nothing evaluated")
         return 2
 
     eval_dir.mkdir(parents=True, exist_ok=True)
-    if old:
+    if old is not None:
         run = RunRecord(
             eval_dir, keys=EVAL_RUN_KEYS, defaults={k: v for k, v in old.items() if k != "status"},
             reason=None, resumes=old["resumes"] + [{

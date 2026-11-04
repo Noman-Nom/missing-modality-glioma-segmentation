@@ -1102,6 +1102,21 @@ def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys):
     assert (rec["status"], rec["fold"], rec["git_dirty"]) == ("ok", "test", False)
     assert check_rules(folder, run) == []
 
+    # AC-16: a list cut short consistently, n_cases included, is still not the test fold
+    whole = (folder / "metrics.csv").read_bytes()
+    edit_csv(folder / "metrics.csv", lambda rows: rows[:15 * 3])
+    edit_json(folder, n_cases=1)
+    assert check_rules(folder, run) == ["case set differs from the test fold: 1 missing, 0 extra"]
+    (folder / "metrics.csv").write_bytes(whole)
+    edit_json(folder, n_cases=2)
+    assert check_rules(folder, run) == []
+
+    # AC-1 as a rule: a subject shared with train is reported, not raised
+    source = load_run(run)
+    edit_json(run, train_cases=source["train_cases"] + ["BraTS-GLI-00007-000"])
+    assert any("shares 1 subject" in e for e in check_rules(folder, run))
+    edit_json(run, train_cases=source["train_cases"])
+
     edit_json(out / f"{e1_run.name}-val", protocol_hash="old")
     assert any("protocol_hash differs" in e for e in check_rules(folder, run))
     edit_json(out / f"{e1_run.name}-val", protocol_hash=protocol_hash())

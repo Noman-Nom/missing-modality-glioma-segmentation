@@ -19,7 +19,7 @@ from common.data import REGIONS, cached_eval_transforms, cached_items, fold_case
 from common.metrics import region_metrics
 from common.missing import PATTERNS, apply_pattern
 from common.model import predict
-from common.runlog import load_run
+from common.runlog import load_config, load_run
 
 REPO = Path(__file__).resolve().parents[2]
 # order matters; model.py is left out on purpose, E4 changes the input channels (spec 0004)
@@ -184,6 +184,23 @@ def _tie_out(rec, rows, source_run):
     return errors
 
 
+def _test_case_set(eval_dir, cases, source_run):
+    """AC-16 on test: the cases scored are the AC-1 list. Returns error strings.
+
+    n_cases comes from the eval's own run.json, so it cannot catch a list cut short consistently.
+    """
+    cfg = load_config(source_run / "config.toml")
+    eval_cfg = load_config(eval_dir / "config.toml")["eval"]
+    try:
+        want = set(eval_cases(cfg, eval_cfg, load_run(source_run), "test"))
+    except GuardError as e:
+        return [str(e)]
+    if cases != want:
+        missing, extra = len(want - cases), len(cases - want)
+        return [f"case set differs from the test fold: {missing} missing, {extra} extra"]
+    return []
+
+
 def check_rules(eval_dir, source_run):
     """Every rule a finished eval folder must hold (AC-9, AC-16). Returns error strings.
 
@@ -222,6 +239,7 @@ def check_rules(eval_dir, source_run):
     if rec["fold"] == "val":
         errors += _tie_out(rec, rows, source_run)
     else:
+        errors += _test_case_set(eval_dir, cases, source_run)
         val_dir = eval_dir.parent / f"{rec['source_run_id']}-val"
         if not (val_dir / "run.json").is_file():
             errors.append(f"{val_dir} missing, no protocol_hash to compare")
