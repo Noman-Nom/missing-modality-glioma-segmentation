@@ -1,7 +1,7 @@
 # 0003. Complete input baseline (E1): a wider 3D U-Net trained on the full train fold, chosen on val
 
 **Date**: 2026-10-27 · updated 2026-11-03 (gradient clipping and failure diagnostics, after the first Kaggle run failed at iteration 669; then float32 training and evaluation, after the second run showed fp16 overflow)
-**Status**: In Progress
+**Status**: Accepted
 
 ## Summary
 

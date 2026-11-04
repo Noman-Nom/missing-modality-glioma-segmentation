@@ -10,8 +10,10 @@ import numpy as np
 import pytest
 import torch
 from common import training
-from common.data import RandBrainIntensityd, cached_train_transforms
+from common.data import RandBrainIntensityd, cached_eval_transforms, cached_train_transforms
+from common.model import build_model
 from common.runlog import dump_config
+from common.seed import set_seed
 from conftest import only_run
 from test_baseline_thread import preprocess, train
 
@@ -174,3 +176,80 @@ def test_intensity_step_draws_only_from_its_own_state():
         out.append(t({"image": x})["image"])
         assert np.array_equal(np.random.get_state()[1], before)
     assert torch.equal(out[0], out[1])
+
+
+# covers: AC-5
+def test_eval_transforms_give_the_cached_case_with_no_randomness(cached_npz):
+    tf = cached_eval_transforms({})
+    a, b = tf(cached_npz), tf(cached_npz)
+    assert set(a) == {"case", "image", "label", "wt", "pixdim"}
+    with np.load(cached_npz["npz"]) as z:
+        np.testing.assert_array_equal(a["image"], z["image"].astype(np.float32))
+        np.testing.assert_array_equal(a["wt"][0], z["label"] > 0)
+    assert a["image"].dtype == np.float32 and a["label"].dtype == np.float32
+    assert a["label"].shape == (3, 20, 20, 20) and a["wt"].dtype == np.uint8
+    for k in ("image", "label", "wt"):
+        np.testing.assert_array_equal(a[k], b[k])
+
+
+# covers: AC-5
+def test_padding_of_a_small_case_stays_zero_after_augmentation(cached_npz):
+    cfg = augment_cfg(0.0)
+    cfg["train"]["patch"] = [24, 24, 24]
+    tf = cached_train_transforms(cfg)
+    tf.set_random_state(seed=0)
+    (d,) = tf(cached_npz)
+    image = np.asarray(d["image"])
+    assert image.shape == (4, 24, 24, 24)
+    assert np.all(image[:, :4] == 0)  # 2 voxels of padding, then 2 of cached background
+    assert np.any(image != 0)
+
+
+def dice_rows(pattern_id, by_region):
+    return [{"pattern_id": pattern_id, "case": f"c{i}", "region": region, "dice": d}
+            for region, values in by_region.items() for i, d in enumerate(values)]
+
+
+# covers: AC-8
+def test_selection_score_is_the_mean_of_region_means_at_pattern_1_only():
+    rows = (dice_rows(1, {"WT": [0.8, 0.6], "TC": [0.5, 0.7], "ET": [0.3, 0.1]})
+            + dice_rows(15, {"WT": [0.0, 0.0], "TC": [0.0, 0.0], "ET": [0.0, 0.0]}))
+    per, score = training.selection_score(rows)
+    assert per == pytest.approx({"WT": 0.7, "TC": 0.6, "ET": 0.2})
+    assert score == pytest.approx(0.5)
+
+
+# covers: AC-8
+def test_validate_applies_each_pattern_in_eval_mode_then_returns_to_train_mode(setup, monkeypatch):
+    assert preprocess.main(setup.pre_argv) == 0
+    set_seed(setup.cfg["seed"])
+    model = build_model(setup.cfg)
+    model.train()
+    seen, real = [], training.predict
+
+    def spy(m, image, cfg, device):
+        seen.append((m.training, int((np.abs(image).sum((1, 2, 3)) == 0).sum())))
+        return real(m, image, cfg, device)
+
+    monkeypatch.setattr(training, "predict", spy)
+    rows = training.validate(model, setup.val, (1, 15), setup.cfg, torch.device("cpu"))
+    assert seen == [(False, 0), (False, 3)]  # all 4 channels, then a single modality
+    assert model.training
+    assert len(rows) == 2 * len(setup.val) * 3
+    assert {r["pattern_id"] for r in rows} == {1, 15}
+
+
+# covers: AC-8
+def test_a_run_with_two_patterns_logs_both_and_selects_on_pattern_1(setup, tmp_path):
+    assert preprocess.main(setup.pre_argv) == 0
+    run_dir = tmp_path / "two"
+    run_dir.mkdir()
+    code = training.train(setup.cfg, run_dir, "two", setup.train, setup.val,
+                          device=torch.device("cpu"), val_patterns=(1, 15))
+    assert code == 0
+    rows = read_csv(run_dir / "val_log.csv")
+    assert sorted({r["pattern_id"] for r in rows}) == ["1", "15"]
+    dice = {g: [float(r["dice"]) for r in rows if r["pattern_id"] == "1" and r["region"] == g]
+            for g in ("WT", "TC", "ET")}
+    (point,) = json.loads((run_dir / "run.json").read_text())["val_history"]
+    assert point["score"] == pytest.approx(np.mean([np.mean(d) for d in dice.values()]))
