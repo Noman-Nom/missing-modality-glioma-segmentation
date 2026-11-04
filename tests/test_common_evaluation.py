@@ -10,7 +10,14 @@ import torch
 from common import evaluation
 from common.cache import write_case
 from common.data import MODALITIES, REGIONS, fold_cases
-from common.evaluation import METRIC_COLUMNS, GuardError, eval_cases, metrics_writer, sweep
+from common.evaluation import (
+    METRIC_COLUMNS,
+    GuardError,
+    clean_metrics,
+    eval_cases,
+    metrics_writer,
+    sweep,
+)
 from common.missing import PATTERNS
 from common.runlog import load_config
 
@@ -177,3 +184,67 @@ def test_metrics_writer_format(tmp_path):
     assert got["eval_id"] == "ev" and float(got["dice"]) == 1 / 3 and got["hd95_mm"] == "2.5"
     assert got["sensitivity"] == "" and got["gt_empty"] == "True"
     assert b"\r" not in path.read_bytes()
+
+
+# covers: AC-5
+def write_pairs(path, pairs, extra=b""):
+    with open(path, "w", newline="") as f:
+        write = metrics_writer(f, "e")
+        for case, p in pairs:
+            write([{"case": case, "subject": "s", "pattern_id": p, "pattern_name": "n",
+                    "region": g, "dice": 0.5, "hd95_mm": 1.0, "sensitivity": 0.5, "precision": 0.5,
+                    "gt_empty": False, "pred_empty": False} for g in REGIONS])
+    with open(path, "ab") as f:
+        f.write(extra)
+    return path.read_bytes()
+
+
+def test_clean_metrics_keeps_a_clean_file(tmp_path):
+    path = tmp_path / "m.csv"
+    before = write_pairs(path, [("a", 1), ("a", 2), ("b", 1)])
+    assert clean_metrics(path) == {("a", 1), ("a", 2), ("b", 1)}
+    assert path.read_bytes() == before
+
+
+def test_clean_metrics_cuts_a_truncated_line(tmp_path):
+    path = tmp_path / "m.csv"
+    before = write_pairs(path, [("a", 1)])
+    write_pairs(path, [("a", 1)], extra=b"e,a,s,2,n,W")
+    assert clean_metrics(path) == {("a", 1)}
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("rows", [1, 2])
+def test_clean_metrics_cuts_part_of_a_pair(tmp_path, rows):
+    path = tmp_path / "m.csv"
+    before = write_pairs(path, [("a", 1)])
+    whole = write_pairs(path, [("a", 1), ("a", 2)])
+    path.write_bytes(b"".join(whole.splitlines(keepends=True)[:4 + rows]))
+    assert clean_metrics(path) == {("a", 1)}
+    assert path.read_bytes() == before
+
+
+def test_clean_metrics_handles_no_rows(tmp_path):
+    path = tmp_path / "m.csv"
+    assert clean_metrics(path) == set() and not path.exists()
+    header = write_pairs(path, [])
+    assert clean_metrics(path) == set() and path.read_bytes() == header
+    path.write_bytes(header[:9])  # killed inside the header: the writer starts it again
+    assert clean_metrics(path) == set() and path.read_bytes() == b""
+
+
+def test_clean_metrics_refuses_a_foreign_file(tmp_path):
+    path = tmp_path / "m.csv"
+    path.write_text("a,b\n1,2\n")
+    with pytest.raises(GuardError, match="header"):
+        clean_metrics(path)
+    assert path.read_text() == "a,b\n1,2\n"
+
+
+def test_sweep_gives_progress_after_each_written_pair(cached):
+    cfg, _ = cached
+    calls = []
+    sweep(Everywhere(), VAL[:1], cfg, torch.device("cpu"),
+          lambda rows: calls.append("write"), patterns=[1, 2],
+          progress=lambda s: calls.append(s["predict_seconds"] > 0))
+    assert calls == ["write", True, "write", True]

@@ -1,6 +1,8 @@
-"""Spec 0004, thin thread on a real synthetic E1 run: guards, the quick sweep, analyse, the Dice
-table and determinism (AC-1, AC-2, AC-3, AC-15). CPU only, no real data."""
+"""Spec 0004 on a real synthetic E1 run: guards, the quick sweep, analyse, the Dice table,
+determinism, the run record, the folder rule, resume, the test gate and check_rules (AC-1, AC-2,
+AC-3, AC-5, AC-6, AC-7, AC-9, AC-10, AC-15, AC-16). CPU only, no real data."""
 import csv
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -9,7 +11,13 @@ from pathlib import Path
 import pytest
 import torch
 from common.data import REGIONS
-from common.evaluation import EVAL_RUN_KEYS, METRIC_COLUMNS
+from common.evaluation import (
+    EVAL_RUN_KEYS,
+    METRIC_COLUMNS,
+    PROTOCOL_FILES,
+    check_rules,
+    protocol_hash,
+)
 from common.missing import PATTERNS
 from common.runlog import dump_config, load_config, load_run
 from conftest import only_run, write_case, write_splits
@@ -37,16 +45,18 @@ def restore_determinism():
 
 @pytest.fixture(scope="module")
 def e1_run(tmp_path_factory):
-    """A real finished E1 run on 2 train and 3 val synthetic cases, tiny config, built once."""
+    """A real finished E1 run on 2 train, 3 val and 2 test synthetic cases, tiny config, with
+    metrics_val.csv, built once. Test cases reach the cache only after training, as in real life."""
     root = tmp_path_factory.mktemp("e1")
     data = root / "data"
     train = [f"BraTS-GLI-0000{i}-000" for i in range(1, 3)]
     val = [f"BraTS-GLI-0000{i}-000" for i in range(4, 7)]
-    for i, c in enumerate(train + val):
+    test = [f"BraTS-GLI-0000{i}-000" for i in range(7, 9)]
+    for i, c in enumerate(train + val + test):
         write_case(data, c, seed=i)
     splits = root / "splits.csv"
     write_splits(splits, [(c, "train", 0, False) for c in train]
-                 + [(c, "val", 0, False) for c in val])
+                 + [(c, "val", 0, False) for c in val] + [(c, "test", 0, False) for c in test])
     cfg = load_config(E1 / "config.toml")
     cfg["data"].update(splits_csv=str(splits), cache_dir=str(root / "cache"))
     cfg["train"].update(iterations=2, val_every=2, patch=[32, 32, 32], num_workers=0)
@@ -58,8 +68,12 @@ def e1_run(tmp_path_factory):
     out = root / "results"
     assert load(E1, "train").main(["--config", str(config), "--out", str(out),
                                    "--device", "cpu"]) == 0
+    run = only_run(out)
+    assert load(E1, "evaluate").main(["--run", str(run), "--device", "cpu"]) == 0
+    assert load(E1, "preprocess").main(["--config", str(config), "--data-dir", str(data),
+                                        "--folds", "test"]) == 0
     torch.use_deterministic_algorithms(False)
-    return only_run(out)
+    return run
 
 
 def run_eval(run, out, *extra):
@@ -169,14 +183,6 @@ def test_subject_shared_with_train_exits_2_before_any_work(e1_run, tmp_path):
     assert not (tmp_path / "o").exists()
 
 
-# The test gate of AC-7 is not built yet, so the test fold stays shut, whatever else is given.
-def test_test_fold_is_refused_until_the_gate_exists(tmp_path, capsys):
-    argv = ["--run", str(tmp_path / "nothing"), "--fold", "test", "--out", str(tmp_path / "o")]
-    assert evaluate.main(argv) == 2
-    assert "not built yet" in capsys.readouterr().out
-    assert not (tmp_path / "o").exists()
-
-
 # covers: AC-3
 def test_nan_metric_sets_failed_and_exit_1(e1_run, tmp_path, monkeypatch):
     def nan_metrics(*a, **k):
@@ -187,11 +193,6 @@ def test_nan_metric_sets_failed_and_exit_1(e1_run, tmp_path, monkeypatch):
     assert run_eval(e1_run, tmp_path / "o", "--quick") == 1
     rec = load_run(tmp_path / "o" / f"{e1_run.name}-val-quick")
     assert rec["status"] == "failed" and "NaN metric" in rec["reason"]
-
-
-def test_existing_eval_folder_is_refused(e1_run, tmp_path):
-    (tmp_path / f"{e1_run.name}-val-quick").mkdir()
-    assert run_eval(e1_run, tmp_path, "--quick") == 2
 
 
 # covers: AC-15
@@ -299,3 +300,434 @@ def test_dice_table_refuses_a_wrong_row_count(quick_eval, tmp_path):
     path.write_text("".join(path.read_text().splitlines(keepends=True)[:-1]))
     with pytest.raises(SystemExit, match="44 Dice rows"):
         make_table.main(["--eval", str(tmp_path / "ev"), "--out-dir", str(tmp_path)])
+
+
+@pytest.fixture(scope="module")
+def val_eval(e1_run, tmp_path_factory):
+    """A finished non quick val eval (3 cases), as the test gate expects it."""
+    out = tmp_path_factory.mktemp("full")
+    assert run_eval(e1_run, out) == 0
+    torch.use_deterministic_algorithms(False)
+    return out / f"{e1_run.name}-val"
+
+
+def edit_json(folder, **fields):
+    (folder / "run.json").write_text(json.dumps(load_run(folder) | fields))
+
+
+def edit_csv(path, change):
+    """Rewrite a CSV after change(rows), which edits the rows in place or returns new ones."""
+    rows = rows_of(path)
+    rows = change(rows) or rows
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+
+
+def copy_quick(quick_eval, tmp_path):
+    copy = tmp_path / "o" / quick_eval.name
+    shutil.copytree(quick_eval, copy)
+    return copy
+
+
+# covers: AC-10
+def test_protocol_hash_is_the_files_in_the_spec_order(quick_eval):
+    assert [Path(f).name for f in PROTOCOL_FILES] == [
+        "config.toml", "analyse.py", "evaluation.py", "metrics.py", "missing.py", "stats.py"]
+    h = hashlib.sha256()
+    for name in PROTOCOL_FILES:
+        h.update((REPO / name).read_bytes())
+    assert h.hexdigest() == protocol_hash() == load_run(quick_eval)["protocol_hash"]
+
+
+def test_a_finished_record_holds_timings_and_no_rerun_fields(quick_eval):
+    rec = load_run(quick_eval)
+    assert rec["predict_seconds"] > 0 and rec["metric_seconds"] > 0
+    assert rec["wall_time_s"] >= rec["predict_seconds"] + rec["metric_seconds"]
+    assert (rec["resumes"], rec["rerun_reason"], rec["superseded"], rec["reason"]) == (
+        [], None, None, None)
+    assert rec["peak_vram_reserved_mib"] is None  # CPU
+
+
+def test_exception_while_loading_the_model_sets_failed(e1_run, tmp_path, monkeypatch):
+    def boom(cfg):
+        raise RuntimeError("no model\nsecond line")
+
+    monkeypatch.setattr(evaluate, "build_model", boom)
+    assert run_eval(e1_run, tmp_path, "--quick") == 1
+    rec = load_run(tmp_path / f"{e1_run.name}-val-quick")
+    assert (rec["status"], rec["reason"]) == ("failed", "RuntimeError: no model")
+
+
+# covers: AC-6
+def test_finished_folder_is_refused_and_left_alone(e1_run, quick_eval, tmp_path, capsys):
+    copy = copy_quick(quick_eval, tmp_path)
+    before = (copy / "metrics.csv").read_bytes()
+    assert run_eval(e1_run, tmp_path / "o", "--quick") == 2
+    assert "--rerun-reason" in capsys.readouterr().out
+    assert (copy / "metrics.csv").read_bytes() == before
+    assert [p.name for p in (tmp_path / "o").iterdir()] == [copy.name]
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_reason_is_no_reason(e1_run, quick_eval, tmp_path, blank):
+    copy_quick(quick_eval, tmp_path)
+    assert run_eval(e1_run, tmp_path / "o", "--quick", "--rerun-reason", blank) == 2
+
+
+def test_a_reason_moves_the_finished_folder_and_is_logged(e1_run, quick_eval, tmp_path):
+    copy = copy_quick(quick_eval, tmp_path)
+    assert run_eval(e1_run, tmp_path / "o", "--quick", "--rerun-reason", "cache rebuilt") == 0
+    (old,) = [p for p in (tmp_path / "o").iterdir() if p != copy]
+    assert old.name.startswith(f"{copy.name}.superseded-")
+    assert load_run(old)["status"] == "ok"
+    assert (old / "metrics.csv").read_bytes() == (quick_eval / "metrics.csv").read_bytes()
+    rec = load_run(copy)
+    assert (rec["status"], rec["rerun_reason"], rec["superseded"]) == (
+        "ok", "cache rebuilt", old.name)
+    assert rec["resumes"] == []
+
+
+def test_a_guard_failure_does_not_move_the_finished_folder(e1_run, quick_eval, tmp_path):
+    copy_quick(quick_eval, tmp_path)
+    run = edit_run(e1_run, tmp_path, status="failed")
+    assert run_eval(run, tmp_path / "o", "--quick", "--rerun-reason", "x") == 1
+    assert [p.name for p in (tmp_path / "o").iterdir()] == [quick_eval.name]
+
+
+def test_a_reason_with_no_finished_folder_is_refused(e1_run, tmp_path, capsys):
+    assert run_eval(e1_run, tmp_path / "o", "--quick", "--rerun-reason", "x") == 2
+    assert "not one" in capsys.readouterr().out
+    assert not (tmp_path / "o").exists()
+
+
+def test_a_reason_does_not_replace_an_unfinished_folder(e1_run, quick_eval, tmp_path):
+    copy = copy_quick(quick_eval, tmp_path)
+    edit_json(copy, status="failed")
+    assert run_eval(e1_run, tmp_path / "o", "--quick", "--rerun-reason", "x") == 2
+    assert load_run(copy)["status"] == "failed"
+
+
+def test_an_empty_folder_is_a_start_that_died_before_its_record(e1_run, tmp_path):
+    (tmp_path / f"{e1_run.name}-val-quick").mkdir()
+    assert run_eval(e1_run, tmp_path, "--quick") == 0
+
+
+def test_metrics_with_no_record_is_refused(e1_run, tmp_path):
+    folder = tmp_path / f"{e1_run.name}-val-quick"
+    folder.mkdir()
+    (folder / "metrics.csv").write_text("anything\n")
+    assert run_eval(e1_run, tmp_path, "--quick") == 2
+    assert (folder / "metrics.csv").read_text() == "anything\n"
+
+
+# covers: AC-5
+def stop_after(run, out, n, monkeypatch):
+    """A killed session: nothing runs after pair n, so run.json stays running."""
+    monkeypatch.setenv("EVAL_STOP_AFTER", str(n))
+    with pytest.raises(SystemExit):
+        run_eval(run, out, "--quick")
+    monkeypatch.delenv("EVAL_STOP_AFTER")
+    return out / f"{run.name}-val-quick"
+
+
+def test_stop_leaves_running_and_seven_whole_pairs(e1_run, tmp_path, monkeypatch):
+    folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
+    rec = load_run(folder)
+    assert rec["status"] == "running" and rec["predict_seconds"] > 0
+    assert len(rows_of(folder / "metrics.csv")) == 21
+
+
+@pytest.mark.parametrize("cut", [0, 5, 400], ids=["clean", "truncated line", "part of a pair"])
+def test_resume_equals_an_uninterrupted_run(e1_run, quick_eval, tmp_path, monkeypatch, cut):
+    folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
+    metrics = folder / "metrics.csv"
+    with open(metrics, "r+b") as f:
+        f.truncate(metrics.stat().st_size - cut)
+    assert run_eval(e1_run, tmp_path, "--quick") == 0
+    assert metrics.read_bytes() == (quick_eval / "metrics.csv").read_bytes()
+    assert load_run(folder)["status"] == "ok"
+    assert load_run(folder)["resumes"][0]["done_pairs"] == (7 if cut == 0 else 6)
+
+
+def test_resume_records_the_entry_and_adds_up_the_timings(e1_run, tmp_path, monkeypatch):
+    folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
+    edit_json(folder, peak_vram_reserved_mib=123.0)
+    first = load_run(folder)
+    assert run_eval(e1_run, tmp_path, "--quick") == 0
+    rec = load_run(folder)
+    (entry,) = rec["resumes"]
+    assert set(entry) == {"utc", "done_pairs", "git_commit", "previous_status"}
+    assert (entry["done_pairs"], entry["git_commit"], entry["previous_status"]) == (
+        7, first["git_commit"], "running")
+    for key in ("predict_seconds", "metric_seconds", "wall_time_s"):
+        assert rec[key] > first[key]
+    assert rec["peak_vram_reserved_mib"] == 123.0
+
+
+def test_a_second_stop_keeps_the_first_entry_and_the_time(e1_run, quick_eval, tmp_path, monkeypatch):
+    folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
+    first = load_run(folder)["predict_seconds"]
+    stop_after(e1_run, tmp_path, 7, monkeypatch)
+    assert load_run(folder)["predict_seconds"] > first
+    assert run_eval(e1_run, tmp_path, "--quick") == 0
+    assert [e["done_pairs"] for e in load_run(folder)["resumes"]] == [7, 14]
+    assert (folder / "metrics.csv").read_bytes() == (quick_eval / "metrics.csv").read_bytes()
+
+
+def test_failed_run_resumes_and_clears_the_reason(e1_run, quick_eval, tmp_path, monkeypatch):
+    real = evaluate.sweep
+
+    def fails(*a, **k):
+        def boom(rows):
+            raise RuntimeError("disk gone")
+
+        real(*a[:4], boom, **k)
+
+    monkeypatch.setattr(evaluate, "sweep", fails)
+    assert run_eval(e1_run, tmp_path, "--quick") == 1
+    monkeypatch.setattr(evaluate, "sweep", real)
+    assert run_eval(e1_run, tmp_path, "--quick") == 0
+    rec = load_run(tmp_path / quick_eval.name)
+    assert (rec["status"], rec["reason"]) == ("ok", None)
+    assert rec["resumes"][0]["previous_status"] == "failed"
+
+
+def test_resume_with_every_pair_done_only_finishes(e1_run, quick_eval, tmp_path):
+    copy = copy_quick(quick_eval, tmp_path)
+    edit_json(copy, status="running")
+    assert run_eval(e1_run, tmp_path / "o", "--quick") == 0
+    rec = load_run(copy)
+    assert rec["status"] == "ok" and rec["resumes"][0]["done_pairs"] == 30
+    assert (copy / "metrics.csv").read_bytes() == (quick_eval / "metrics.csv").read_bytes()
+
+
+@pytest.mark.parametrize("key", ["git_commit", "config_hash", "protocol_hash", "source_run_id",
+                                 "source_config_hash", "source_best_iteration"])
+def test_resume_mismatch_is_refused_before_any_cut(e1_run, tmp_path, monkeypatch, key, capsys):
+    folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
+    edit_json(folder, **{key: "other"})
+    metrics = folder / "metrics.csv"
+    with open(metrics, "ab") as f:
+        f.write(b"truncated")
+    before = metrics.read_bytes()
+    assert run_eval(e1_run, tmp_path, "--quick") == 2
+    assert key in capsys.readouterr().out
+    assert metrics.read_bytes() == before
+    assert load_run(folder)["resumes"] == []
+
+
+# covers: AC-9, AC-16
+@pytest.fixture
+def broken(val_eval, e1_run, tmp_path):
+    """Copies of the val eval and the E1 run, so one rule can be broken at a time."""
+    out = tmp_path / "o"
+    shutil.copytree(val_eval, out / val_eval.name)
+    run = tmp_path / "e1"
+    shutil.copytree(e1_run, run)
+    return out / val_eval.name, run
+
+
+def test_rules_pass_on_a_real_val_eval(val_eval, e1_run):
+    assert check_rules(val_eval, e1_run) == []
+
+
+def test_rules_stop_on_a_missing_record(tmp_path):
+    assert "run.json missing" in check_rules(tmp_path, tmp_path)[0]
+
+
+@pytest.mark.parametrize(("fields", "message"), [
+    ({"status": "running"}, "status is 'running'"),
+    ({"quick": True}, "quick run"),
+    ({"gpu": "other"}, "gpu is 'other'"),
+    ({"n_cases": 4}, "rows, expected 180"),
+])
+def test_rules_refuse_a_broken_record(broken, fields, message):
+    ev, run = broken
+    edit_json(ev, **fields)
+    assert any(message in e for e in check_rules(ev, run))
+
+
+def test_rules_refuse_a_missing_row(broken):
+    ev, run = broken
+    edit_csv(ev / "metrics.csv", lambda rows: rows[:-1])
+    errors = check_rules(ev, run)
+    assert any("rows, expected 135" in e for e in errors)
+    assert any("1 missing" in e for e in errors)
+
+
+def test_rules_refuse_a_repeated_row(broken):
+    ev, run = broken
+    edit_csv(ev / "metrics.csv", lambda rows: rows[:-1] + rows[:1])
+    assert any("1 repeated" in e for e in check_rules(ev, run))
+
+
+def test_rules_refuse_a_nan_row(broken):
+    ev, run = broken
+    edit_csv(ev / "metrics.csv", lambda rows: rows[0].update(hd95_mm="nan"))
+    assert any("no Dice or HD95" in e for e in check_rules(ev, run))
+
+
+def test_rules_refuse_missing_metrics_files(broken):
+    ev, run = broken
+    (run / "metrics_val.csv").unlink()
+    assert any("no tie out" in e for e in check_rules(ev, run))
+    (ev / "metrics.csv").unlink()
+    assert any("metrics.csv missing" in e for e in check_rules(ev, run))
+
+
+def shift(rows, amounts):
+    """Add amounts[region] to the WT, TC or ET Dice of every row."""
+    for r in rows:
+        r["dice"] = repr(float(r["dice"]) + amounts.get(r["region"], 0.0))
+
+
+def test_tie_out_refuses_a_mean_off_by_0_002(broken):
+    ev, run = broken
+    edit_csv(run / "metrics_val.csv", lambda rows: shift(rows, {"TC": 0.002}))
+    assert [e for e in check_rules(ev, run) if "Dice" in e] == [
+        "TC mean Dice differs from E1 by 0.002000"]
+
+
+def test_tie_out_keeps_a_mean_inside_the_limit(broken):
+    ev, run = broken
+    edit_csv(run / "metrics_val.csv", lambda rows: shift(rows, {"TC": 0.0009}))
+    assert check_rules(ev, run) == []
+
+
+def test_tie_out_refuses_one_case_off_with_the_mean_unchanged(broken):
+    ev, run = broken
+
+    def opposite(rows):
+        wt = [r for r in rows if r["region"] == "WT"]
+        wt[0]["dice"] = repr(float(wt[0]["dice"]) + 0.02)
+        wt[1]["dice"] = repr(float(wt[1]["dice"]) - 0.02)
+
+    edit_csv(run / "metrics_val.csv", opposite)
+    (error,) = check_rules(ev, run)
+    assert error.startswith("2 case Dice value(s) differ from E1")
+
+
+def test_tie_out_refuses_another_case_set(broken):
+    ev, run = broken
+    edit_csv(run / "metrics_val.csv", lambda rows: rows[3:])
+    assert any("case set differs" in e for e in check_rules(ev, run))
+
+
+# covers: AC-7
+def run_test(run, out, *extra):
+    return evaluate.main(["--run", str(run), "--fold", "test", "--out", str(out),
+                          "--device", "cpu", *extra])
+
+
+@pytest.fixture
+def gate(val_eval, e1_run, tmp_path, monkeypatch):
+    """Everything open: a clean git_info and a good val eval. A test closes one rule. Any read of
+    a test case raises, so a refused call proves that it touched none."""
+    out = tmp_path / "o"
+    shutil.copytree(val_eval, out / val_eval.name)
+    run = tmp_path / "e1"
+    shutil.copytree(e1_run, run)
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+
+    def no_read(*a, **k):
+        raise AssertionError("the test fold was read")
+
+    for name in ("eval_cases", "check_cache", "sweep"):
+        monkeypatch.setattr(evaluate, name, no_read)
+    monkeypatch.setattr("numpy.load", no_read)
+    return out, out / val_eval.name, run, monkeypatch
+
+
+def assert_refused(run, out, message, capsys, *extra):
+    assert run_test(run, out, *extra) == 2
+    assert message in capsys.readouterr().out
+    assert not list(out.glob("*-test*"))
+
+
+def test_gate_needs_open_test(gate, capsys):
+    out, _, run, _ = gate
+    assert_refused(run, out, "--open-test not given", capsys)
+
+
+def test_gate_refuses_quick(gate, capsys):
+    out, _, run, _ = gate
+    assert_refused(run, out, "--quick is not allowed", capsys, "--open-test", "--quick")
+
+
+@pytest.mark.parametrize("dirty", [True, None])
+def test_gate_refuses_a_dirty_or_unknown_tree(gate, capsys, dirty):
+    out, _, run, monkeypatch = gate
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", dirty))
+    assert_refused(run, out, f"git_dirty is {dirty}", capsys, "--open-test")
+
+
+def test_gate_refuses_a_quick_e1_run(gate, capsys):
+    out, _, run, _ = gate
+    edit_json(run, quick=True)
+    assert_refused(run, out, "the E1 run is a quick run", capsys, "--open-test")
+
+
+def test_gate_refuses_no_val_eval(gate, capsys):
+    out, val, run, _ = gate
+    shutil.rmtree(val)
+    assert_refused(run, out, "finish the val eval first", capsys, "--open-test")
+
+
+def test_gate_refuses_an_unfinished_val_eval(gate, capsys):
+    out, val, run, _ = gate
+    edit_json(val, status="running")
+    assert_refused(run, out, "val eval: status is 'running'", capsys, "--open-test")
+
+
+def test_gate_reruns_the_rules_on_val(gate, capsys):
+    out, _, run, _ = gate
+    edit_csv(run / "metrics_val.csv", lambda rows: shift(rows, {"ET": 0.5}))
+    assert_refused(run, out, "val eval: ET mean Dice differs", capsys, "--open-test")
+
+
+def test_gate_refuses_a_changed_protocol(gate, capsys):
+    out, val, run, _ = gate
+    edit_json(val, protocol_hash="old")
+    assert_refused(run, out, "rerun val with --rerun-reason", capsys, "--open-test")
+
+
+def test_gate_prints_every_failed_rule(gate, capsys):
+    out, val, run, monkeypatch = gate
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", True))
+    edit_json(val, protocol_hash="old")
+    assert run_test(run, out, "--quick") == 2
+    printed = capsys.readouterr().out
+    for message in ("--open-test not given", "--quick is not allowed", "git_dirty is True",
+                    "protocol_hash differs"):
+        assert message in printed
+
+
+def test_gate_refuses_open_test_on_val(gate, capsys):
+    out, _, run, _ = gate
+    assert evaluate.main(["--run", str(run), "--fold", "val", "--out", str(out), "--device", "cpu",
+                          "--open-test"]) == 2
+    assert "only for --fold test" in capsys.readouterr().out
+
+
+def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys):
+    out, _, run, monkeypatch = gate
+    monkeypatch.undo()
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    assert run_test(run, out, "--open-test") == 0
+    folder = out / f"{e1_run.name}-test"
+    rows = rows_of(folder / "metrics.csv")
+    assert len(rows) == 2 * 15 * 3
+    assert {r["case"] for r in rows} == {"BraTS-GLI-00007-000", "BraTS-GLI-00008-000"}
+    rec = load_run(folder)
+    assert (rec["status"], rec["fold"], rec["git_dirty"]) == ("ok", "test", False)
+    assert check_rules(folder, run) == []
+
+    edit_json(out / f"{e1_run.name}-val", protocol_hash="old")
+    assert any("protocol_hash differs" in e for e in check_rules(folder, run))
+    edit_json(out / f"{e1_run.name}-val", protocol_hash=protocol_hash())
+    assert run_test(run, out, "--open-test") == 2  # one finished run (AC-6)
+    assert "finished" in capsys.readouterr().out
+    assert run_test(run, out, "--open-test", "--rerun-reason", "synthetic") == 0
+    assert load_run(folder)["rerun_reason"] == "synthetic"
