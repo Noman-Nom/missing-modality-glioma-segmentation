@@ -115,7 +115,7 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
   - [x] Human runs: preprocess, verify, memory test, full training, evaluate, table, check (AC-2, AC-6, AC-7, AC-8, AC-9, AC-13, AC-16). First Kaggle run 2026-11-03 failed at iteration 669 (non finite loss); the rerun after the stability fix failed the same way, diagnosed as fp16 overflow; the third run in float32 (2026-11-03, `20261103-023817-f9b3afb6`) passed `check_baseline.py`
   - [x] Stability fix (build plan step 8, from spec update 2026-11-03): gradient clip at 12, `grad_norm` column, `failure` diagnostics, tests (AC-7, AC-10, AC-12, AC-18)
   - [x] float32 (build plan step 9, from spec update 2026-11-03): `amp = false`, 9 h memory test gate, gated Kaggle cell 4, `amp` check in `check_baseline.py`, tests (AC-6, AC-7, AC-16, AC-18)
-- [ ] Verify it: /check verify E1 complete-input baseline
+- [x] Verify it: /check verify E1 complete-input baseline
 - [ ] Test it: /test E1 complete-input baseline
 
 ### 6. Missing-modality evaluation, 15 patterns (E2) · needs a decision · GA (planned)
