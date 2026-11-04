@@ -7,8 +7,8 @@ import json
 import pytest
 import torch
 from common import training
-from common.runlog import config_hash, dump_config
-from conftest import only_run
+from common.runlog import config_hash, dump_config, load_config
+from conftest import only_run, write_case
 from test_baseline_thread import evaluate, load, preprocess, train
 
 memory_test, check, gpu_bench = load("memory_test"), load("check_baseline"), load("gpu_bench")
@@ -110,6 +110,14 @@ def test_check_passes_a_run_that_meets_every_threshold(evaluated, monkeypatch, c
     ({"best_iteration": 7}, "not a val point"),
     ({"cache_hash": "0" * 64}, "cache hash"),
     ({"val_cases": ["BraTS-GLI-00009-000"]}, "AC-4: test fold"),
+    ({"status": "failed", "reason": "boom"}, "status failed: boom"),
+    ({"config_hash": "0" * 64}, "config.toml hash differs"),
+    ({"extra": 1}, "run.json keys differ"),
+    ({"iterations": 9}, "one row per iteration"),
+    ({"peak_vram_reserved_mib": None}, "peak VRAM not logged"),
+    ({"val_history": []}, "0 val points"),
+    ({"loss_start_mean": 9.0}, "loss means in run.json"),
+    ({"train_cases": ["BraTS-GLI-00001-000"]}, "train cases: 1 used"),
 ])
 def test_check_reasons(evaluated, monkeypatch, capsys, change, reason):
     rec = as_full_run(evaluated, monkeypatch)
@@ -192,3 +200,113 @@ def test_gpu_bench_driver_prints_once_with_two_gpus(monkeypatch):
     monkeypatch.setattr(gpu_bench.subprocess, "run",
                         lambda *a, **k: type("R", (), {"stdout": out})())
     assert gpu_bench.driver_version() == "580.178.04"
+
+
+def rewrite_metrics(run, change):
+    with open(run / "metrics_val.csv", newline="") as f:
+        rows = list(csv.DictReader(f))
+    change(rows)
+    with open(run / "metrics_val.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+
+
+def drop_log_row(run):
+    log = read_log(run)
+    with open(run / "train_log.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, list(log[0]))
+        w.writeheader()
+        w.writerows(log[:4] + log[5:])
+
+
+def other_cache_hash(run):
+    path = check.cache_dir(load_config(run / "config.toml")) / "cache.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), preprocess_hash="0" * 64)))
+
+
+def edit_config(run):
+    path = run / "config.toml"
+    path.write_text(path.read_text().replace("seed = 42", "seed = 7"))
+
+
+def set_metric(key, value):
+    return lambda run: rewrite_metrics(run, lambda rows: rows[0].update({key: value}))
+
+
+def rename_metric_column(run):
+    def change(rows):
+        for r in rows:
+            r["dice_score"] = r.pop("dice")
+    rewrite_metrics(run, change)
+
+
+# covers: AC-16
+@pytest.mark.parametrize("damage, reason", [
+    (lambda run: (run / "run.json").unlink(), "run.json missing"),
+    (lambda run: (run / "config.toml").unlink(), "config.toml missing"),
+    (edit_config, "config.toml hash differs"),
+    (other_cache_hash, "cache.json hash differs"),
+    (drop_log_row, "one row per iteration"),
+    (lambda run: (run / "checkpoints" / "best.pt").unlink(), "best.pt missing"),
+    (set_metric("case", "BraTS-GLI-00001-000"), "metrics cases differ"),
+    (set_metric("dice", "nan"), "dice NaN"),
+    (set_metric("hd95_mm", ""), "hd95_mm NaN"),
+    (rename_metric_column, "metrics_val.csv columns"),
+], ids=["no_run_json", "no_config", "edited_config", "cache_json", "log_gap", "no_best",
+        "other_case", "nan_dice", "blank_hd95", "columns"])
+def test_check_fails_on_a_damaged_run_folder(evaluated, monkeypatch, capsys, damage, reason):
+    as_full_run(evaluated, monkeypatch)
+    damage(evaluated)
+    assert check.main([str(evaluated)]) == 1
+    assert reason in capsys.readouterr().out
+
+
+# covers: AC-16
+def test_check_needs_exactly_one_run_folder(capsys):
+    assert check.main([]) == 1
+    assert "usage" in capsys.readouterr().out
+
+
+def no_cache_json(setup):
+    (setup.cache / "cache.json").unlink()
+
+
+def stale_cache_json(setup):
+    path = setup.cache / "cache.json"
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), preprocess_hash="0" * 64)))
+
+
+def no_case_file(setup):
+    (setup.cache / f"{setup.val[0]}.npz").unlink()
+
+
+# covers: AC-3
+@pytest.mark.parametrize("damage", [no_cache_json, stale_cache_json, no_case_file])
+def test_every_script_stops_with_exit_2_on_a_bad_cache(setup, tmp_path, damage):
+    assert preprocess.main(setup.pre_argv) == 0
+    assert train.main(setup.train_argv) == 0
+    run = only_run(setup.out)
+    damage(setup)
+    mem = tmp_path / "mem"
+
+    assert train.main(setup.train_argv) == 2
+    assert memory_test.main(["--config", str(setup.config), "--device", "cpu",
+                             "--out", str(mem)]) == 2
+    assert evaluate.main(["--run", str(run), "--device", "cpu"]) == 2
+
+    assert only_run(setup.out) == run  # no new run folder
+    assert not mem.exists() and not (run / "metrics_val.csv").exists()
+
+
+# covers: AC-4
+def test_evaluate_refuses_a_test_fold_case_in_the_run_record(setup):
+    test_case = "BraTS-GLI-00009-000"
+    write_case(setup.data, test_case, seed=9)
+    assert preprocess.main(setup.pre_argv + ["--folds", "train,val,test"]) == 0
+    assert train.main(setup.train_argv) == 0
+    run = only_run(setup.out)
+    rec = json.loads((run / "run.json").read_text())
+    (run / "run.json").write_text(json.dumps(dict(rec, val_cases=[test_case])))
+    assert evaluate.main(["--run", str(run), "--device", "cpu"]) == 2
+    assert not (run / "metrics_val.csv").exists()

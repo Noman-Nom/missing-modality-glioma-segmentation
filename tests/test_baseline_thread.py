@@ -20,7 +20,7 @@ from common.cache import (
 )
 from common.data import case_paths, crop_box, fold_cases, load_case
 from common.runlog import config_hash, dump_config, load_config
-from conftest import only_run, write_case
+from conftest import only_run, write_case, write_splits
 
 REPO = Path(__file__).resolve().parents[1]
 EXP = REPO / "experiments" / "0003-baseline"
@@ -213,3 +213,183 @@ def test_a_hook_that_draws_does_not_change_the_patches(setup, tmp_path):
                               device=torch.device("cpu"), batch_hook=recorder(name, draws))
         assert code == 0
     assert seen["quiet"] == seen["drawing"] and len(seen["quiet"]) == 3
+
+
+def trained_run(setup):
+    """Preprocess and train the tiny setup; returns the run folder."""
+    assert preprocess.main(setup.pre_argv) == 0
+    assert train.main(setup.train_argv) == 0
+    return only_run(setup.out)
+
+
+def read_rows(path):
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+# covers: AC-1
+def test_fold_cases_filters_by_timepoint_and_flag_and_only_gives_the_asked_fold(tmp_path):
+    a0, a1, flagged, val, test = ("BraTS-GLI-00001-000", "BraTS-GLI-00001-001",
+                                  "BraTS-GLI-00002-000", "BraTS-GLI-00003-000",
+                                  "BraTS-GLI-00004-000")
+    splits = tmp_path / "splits.csv"
+    write_splits(splits, [(flagged, "train", 0, True), (a1, "train", 1, False),
+                          (a0, "train", 0, False), (val, "val", 0, False),
+                          (test, "test", 0, False)])
+    assert fold_cases(splits, "train", [0, 1], True) == [a0, a1]
+    assert fold_cases(splits, "train", [0], False) == [a0, flagged]
+    assert fold_cases(splits, "train") == [a0, a1, flagged]
+    assert fold_cases(splits, "test") == [test]
+
+
+# covers: AC-2
+def test_preprocess_caches_cases_the_training_filters_leave_out(setup):
+    flagged, later = "BraTS-GLI-00004-000", "BraTS-GLI-00005-001"
+    write_case(setup.data, flagged, seed=7)
+    write_case(setup.data, later, seed=8)
+    write_splits(setup.splits, [*((c, "train", 0, False) for c in setup.train),
+                                (flagged, "train", 0, True), (later, "val", 1, False),
+                                *((c, "val", 0, False) for c in setup.val)])
+    assert preprocess.main(setup.pre_argv) == 0
+    manifest = read_manifest(setup.cache)
+    assert {flagged, later} <= set(manifest) and manifest[later]["timepoint"] == "1"
+    used = train.run_cases(setup.cfg)
+    assert used == (setup.train, setup.val)
+
+
+# covers: AC-2
+def test_preprocess_quick_caches_only_the_quick_run_cases(setup):
+    assert preprocess.main(setup.pre_argv + ["--quick"]) == 0
+    assert sorted(read_manifest(setup.cache)) == sorted(setup.train[:2] + setup.val[:1])
+
+
+# covers: AC-2
+def test_rerun_writes_back_a_deleted_case_and_keeps_the_cache_record(setup, capsys):
+    assert preprocess.main(setup.pre_argv) == 0
+    created = read_cache_json(setup.cache)["created_utc"]
+    (setup.cache / f"{setup.train[0]}.npz").unlink()
+    capsys.readouterr()
+    assert preprocess.main(setup.pre_argv) == 0
+    assert "1 written, 3 skipped" in capsys.readouterr().out
+    info = read_cache_json(setup.cache)
+    assert info["n_cases"] == 4 and info["created_utc"] == created
+
+
+# covers: AC-2
+@pytest.mark.parametrize("extra", [["--folds", "holdout"], ["--folds", ","],
+                                   ["--data-dir", "/no/such/folder"]])
+def test_preprocess_refuses_bad_arguments(setup, extra):
+    assert preprocess.main(setup.pre_argv + extra) == 2
+    assert not setup.cache.exists()
+
+
+# covers: AC-2
+def test_preprocess_caches_nothing_when_an_input_file_is_missing(setup):
+    next((setup.data / setup.val[0]).glob("*-seg.nii.gz")).unlink()
+    assert preprocess.main(setup.pre_argv) == 2
+    assert not setup.cache.exists()
+
+
+# covers: AC-10
+def test_train_prints_the_run_dir_hash_seed_and_commit_at_start(setup, capsys):
+    assert preprocess.main(setup.pre_argv) == 0
+    capsys.readouterr()
+    assert train.main(setup.train_argv) == 0
+    out = capsys.readouterr().out
+    run = only_run(setup.out)
+    rec = json.loads((run / "run.json").read_text())
+    assert str(run) in out and config_hash(setup.cfg) in out
+    assert "seed 42" in out and f"git {rec['git_commit']}" in out
+
+
+# covers: AC-13
+def test_evaluate_refuses_a_run_without_best_pt(setup):
+    run = trained_run(setup)
+    (run / "checkpoints" / "best.pt").unlink()
+    assert evaluate.main(["--run", str(run), "--device", "cpu"]) == 1
+    assert not (run / "metrics_val.csv").exists()
+
+
+# covers: AC-13
+def test_evaluate_refuses_a_checkpoint_from_another_config(setup):
+    run = trained_run(setup)
+    best = run / "checkpoints" / "best.pt"
+    state = torch.load(best)
+    torch.save(dict(state, config_hash="0" * 64), best)
+    assert evaluate.main(["--run", str(run), "--device", "cpu"]) == 1
+    assert not (run / "metrics_val.csv").exists()
+
+
+# covers: AC-13
+def test_evaluate_needs_best_pt_and_not_last_pt(setup):
+    run = trained_run(setup)
+    (run / "checkpoints" / "last.pt").unlink()
+    assert evaluate.main(["--run", str(run), "--device", "cpu"]) == 0
+
+
+# covers: AC-13, AC-14
+def test_an_empty_region_is_scored_by_the_rule_and_counted_in_the_table(setup, tmp_path):
+    run = trained_run(setup)
+    path = setup.cache / f"{setup.val[0]}.npz"
+    with np.load(path) as z:
+        parts = {k: z[k] for k in z.files}
+    np.savez(path, **dict(parts, label=np.zeros_like(parts["label"])))
+
+    assert evaluate.main(["--run", str(run), "--device", "cpu"]) == 0
+    rows = read_rows(run / "metrics_val.csv")
+    assert len(rows) == 3
+    for r in rows:
+        assert r["gt_empty"] == "True" and r["sensitivity"] == ""
+        assert (float(r["dice"]), float(r["hd95_mm"])) in {(1.0, 0.0), (0.0, 373.13)}
+
+    out = tmp_path / "table.tex"
+    assert make_table.main(["--run", str(run), "--out", str(out)]) == 0
+    body = [ln for ln in out.read_text().splitlines() if ln.startswith(("WT &", "TC &", "ET &"))]
+    counts = [ln.removesuffix(r" \\").split(" & ")[-2:] for ln in body]
+    assert all(sum(int(n) for n in c) == 1 for c in counts)  # this case in exactly one count
+
+
+def write_toy_run(run, rows):
+    """A run folder holding only what make_table.py reads."""
+    run.mkdir()
+    (run / "run.json").write_text(json.dumps({
+        "run_id": "toy", "val_cases": ["a", "b", "c"], "config_hash": "h", "git_commit": "g",
+        "seed": 43, "best_iteration": 28000}))
+    with open(run / "metrics_val.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, ["case", "region", "dice", "hd95_mm", "gt_empty", "pred_empty"])
+        w.writeheader()
+        w.writerows(dict(zip(w.fieldnames, r)) for r in rows)
+
+
+TOY_ROWS = [
+    ("a", "WT", 0.9, 2.0, False, False), ("b", "WT", 0.8, 4.0, False, False),
+    ("c", "WT", 0.1, 9.0, False, False),
+    ("a", "TC", 1.0, 0.0, True, True), ("b", "TC", 0.0, 373.13, False, True),
+    ("c", "TC", 0.5, 3.0, False, False),
+    ("a", "ET", 0.0, 373.13, True, False), ("b", "ET", 1.0, 1.0, False, False),
+    ("c", "ET", 1.0, 1.0, False, False),
+]
+
+
+# covers: AC-14
+def test_table_rows_hold_the_statistics_and_the_empty_counts(tmp_path):
+    write_toy_run(tmp_path / "run", TOY_ROWS)
+    lines = make_table.make(tmp_path / "run").splitlines()
+    assert r"WT & 0.600 & 0.800 & 5.0 & 4.0 & 0 & 0 \\" in lines
+    assert r"TC & 0.500 & 0.500 & 125.4 & 3.0 & 1 & 1 \\" in lines
+    assert r"ET & 0.667 & 1.000 & 125.0 & 1.0 & 0 & 1 \\" in lines
+    assert any("n = 3, seed 43, checkpoint at iteration 28000. Not a test result." in ln
+               for ln in lines)
+
+
+# covers: AC-14
+def test_table_refuses_a_run_without_metrics(tmp_path):
+    write_toy_run(tmp_path / "run", TOY_ROWS)
+    (tmp_path / "run" / "metrics_val.csv").unlink()
+    with pytest.raises(SystemExit, match="missing"):
+        make_table.make(tmp_path / "run")
+
+
+# covers: AC-14
+def test_table_goes_to_the_writing_folder_by_default():
+    assert make_table.OUT == REPO / "writing" / "tables" / "0003-baseline-val.tex"

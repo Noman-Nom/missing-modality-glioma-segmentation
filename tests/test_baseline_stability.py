@@ -4,7 +4,9 @@ config. Covers AC-7, AC-10, AC-12 (verify.md, Stability fix checks)."""
 import csv
 import json
 import math
+from contextlib import nullcontext
 
+import numpy as np
 import pytest
 import torch
 from common import training
@@ -146,3 +148,86 @@ def test_no_forward_hook_is_left_after_the_diagnostics(ten):
         tr.step(1, inject_at=1)
     assert e.value.failure["first_nonfinite_module"] is not None
     assert all(not m._forward_hooks for m in tr.model.modules())
+
+
+class FakeScaler:
+    """Stands in for GradScaler, which needs a GPU. A step it skips lowers the scale."""
+
+    def __init__(self, calls, skips):
+        self.calls, self.skips, self.value = calls, skips, 1024.0
+
+    def scale(self, loss):
+        self.calls.append("scale")
+        return loss
+
+    def get_scale(self):
+        return self.value
+
+    def unscale_(self, opt):
+        self.calls.append("unscale")
+
+    def step(self, opt):
+        self.calls.append("step")
+
+    def update(self):
+        self.calls.append("update")
+        if self.skips:
+            self.value /= 2
+
+
+# covers: AC-7, AC-12
+@pytest.mark.parametrize("skips, skipped", [(True, 1), (False, 0)])
+def test_amp_path_unscales_before_the_clip_and_counts_a_skipped_step(ten, monkeypatch, skips,
+                                                                     skipped):
+    tr, calls = trainer(ten), []
+    tr.amp, tr.scaler = True, FakeScaler(calls, skips)
+    real_clip = torch.nn.utils.clip_grad_norm_
+
+    def clip(params, max_norm):
+        calls.append("clip")
+        real_clip(params, max_norm)
+        return torch.tensor(math.inf)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", clip)
+    monkeypatch.setattr(torch, "autocast", lambda **k: nullcontext())  # no fp16 on this CPU path
+    s = tr.step(1)
+    assert calls == ["scale", "unscale", "clip", "step", "update"]
+    assert tr.skipped == skipped
+    assert s["grad_norm"] == math.inf  # an inf norm is logged, it is not a failure
+
+
+# covers: AC-7
+def test_amp_stays_off_on_cpu_even_when_the_config_asks_for_it(ten):
+    ten.cfg["train"]["amp"] = True
+    tr = trainer(ten)
+    assert tr.amp is False and not tr.scaler.is_enabled()
+
+
+# covers: AC-7
+def test_the_optimiser_is_adamw_with_the_config_settings(ten):
+    tr = trainer(ten)
+    assert isinstance(tr.opt, torch.optim.AdamW)
+    assert tr.opt.defaults["lr"] == 1e-3 and tr.opt.defaults["weight_decay"] == 1e-5
+
+
+# covers: AC-17
+def test_the_model_gets_what_the_hook_returns(ten):
+    tr = trainer(ten)
+
+    def poison(batch, rng):
+        return dict(batch, image=torch.full_like(batch["image"], float("inf")))
+
+    with pytest.raises(training.NonFiniteLoss):
+        tr.step(1, poison)
+
+
+# covers: AC-17
+def test_the_hook_rng_is_seeded_with_seed_plus_one(ten):
+    tr, drawn = trainer(ten), []
+
+    def hook(batch, rng):
+        drawn.append(rng.random())
+        return batch
+
+    tr.step(1, hook)
+    assert drawn == [np.random.default_rng(ten.cfg["seed"] + 1).random()]

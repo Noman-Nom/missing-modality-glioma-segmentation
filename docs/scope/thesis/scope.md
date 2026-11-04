@@ -18,7 +18,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 13 | Tracer review fixes                                  | Slice 2    | done    |
 | 3  | Subject-level split and leakage test                 | Slice 2    | done    |
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
-| 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | in-progress |
+| 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | done |
 | 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | planned |
 | 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | planned |
 | 8  | Reduced-label study (E5), optional                   | Slice 5    | planned |
@@ -102,13 +102,13 @@ Code in `experiments/common/data.py`.
 
 ## Slice 3: Baseline and the missing modality drop
 
-### 5. Compact 3D U-Net baseline, GPU memory test (E1) (in-progress)
+### 5. Compact 3D U-Net baseline, GPU memory test (E1) (done)
 The complete input baseline every strategy is compared against, trained on the full train fold within 4 GB. Spec: [0003](../../specs/thesis/0003-complete-input-baseline/index.md).
 Done when: the baseline trains on the train fold, picks its checkpoint on val only, fits in 4 GB with the peak logged, and its check passes.
 Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experiments/0003-baseline/`.
 
 - [x] Design it (spec): /architect compact 3D U-Net baseline
-- [ ] Build it: /develop E1 complete-input baseline
+- [x] Build it: /develop E1 complete-input baseline
   - [x] Thin thread: `fold_cases()`, float16 cache and `preprocess.py`, minimal shared loop, `train.py`, `evaluate.py`, `make_table.py`, quick run on synthetic cases (AC-1, AC-2, AC-3, AC-4, AC-10, AC-13, AC-14, AC-17)
   - [x] Thicken: warmup and cosine lr, val with patterns and selection, write order, augmentation (AC-5, AC-7, AC-8)
   - [x] Robustness and checks: full state resume, failures, `--verify`, `memory_test.py`, `check_baseline.py`, determinism tests, docs (AC-6, AC-9, AC-11, AC-12, AC-15, AC-16, AC-18)
@@ -116,7 +116,7 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
   - [x] Stability fix (build plan step 8, from spec update 2026-11-03): gradient clip at 12, `grad_norm` column, `failure` diagnostics, tests (AC-7, AC-10, AC-12, AC-18)
   - [x] float32 (build plan step 9, from spec update 2026-11-03): `amp = false`, 9 h memory test gate, gated Kaggle cell 4, `amp` check in `check_baseline.py`, tests (AC-6, AC-7, AC-16, AC-18)
 - [x] Verify it: /check verify E1 complete-input baseline
-- [ ] Test it: /test E1 complete-input baseline
+- [x] Test it: /test E1 complete-input baseline
 
 ### 6. Missing-modality evaluation, 15 patterns (E2) · needs a decision · GA (planned)
 Measure how the baseline degrades under every one of the 15 non empty modality subsets (RQ1).

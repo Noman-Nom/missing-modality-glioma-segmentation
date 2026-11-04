@@ -373,7 +373,7 @@ def keep_rows(path, last_iteration):
     return rows
 
 
-def _val_point(tr, rec, run_dir, it, val_patterns, prog):
+def _val_point(tr, rec, run_dir, it, val_patterns, prog, row, write_row):
     v0 = time.time()
     rows = validate(tr.model, rec.data["val_cases"], val_patterns, tr.cfg, tr.device)
     per, score = selection_score(rows)
@@ -388,15 +388,17 @@ def _val_point(tr, rec, run_dir, it, val_patterns, prog):
     state = {"model": tr.model.state_dict(), "iteration": it,
              "config_hash": rec.data["config_hash"], "score": score}
     ckpt = run_dir / "checkpoints"
-    # fixed write order (AC-8): val_log.csv, best.pt if improved, last.pt, run.json
+    # fixed write order (AC-8): val_log.csv, best.pt if improved, last.pt, run.json. The
+    # train_log.csv row goes before both checkpoints, so a last.pt on disk always has its row:
+    # a stop right after last.pt stays resumable (AC-12); a stop before it leaves a row resume drops
     append_val_log(run_dir / "val_log.csv", it, rows)
+    write_row(row + [per["WT"], per["TC"], per["ET"], score])
     if improved:
         save_checkpoint(ckpt / "best.pt", **state)
     save_checkpoint(ckpt / "last.pt", **state, **tr.full_state(),
                     best_score=rec.data["best_score"], best_iteration=rec.data["best_iteration"])
     _record_progress(rec, tr.device, prog)
     rec.write()
-    return [per["WT"], per["TC"], per["ET"], score]
 
 
 def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, val_patterns, prog):
@@ -410,6 +412,11 @@ def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, val_patterns
     start = len(prog.losses)
     with open(run_dir / "train_log.csv", "a" if start else "w", newline="") as f:
         log = csv.writer(f)
+
+        def write_row(row):
+            log.writerow(row)
+            f.flush()
+
         if not start:
             log.writerow(LOG_COLUMNS)
         for it in range(start + 1, t["iterations"] + 1):
@@ -422,11 +429,9 @@ def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, val_patterns
                    round(s["seconds"], 4)]
             rec.update(iterations=it, scaler_skipped_steps=tr.skipped)
             if it % t["val_every"] == 0:
-                row += _val_point(tr, rec, run_dir, it, val_patterns, prog)
+                _val_point(tr, rec, run_dir, it, val_patterns, prog, row, write_row)
             else:
-                row += [""] * 4
-            log.writerow(row)
-            f.flush()
+                write_row(row + [""] * 4)
 
 
 def _record_progress(rec, device, prog):
