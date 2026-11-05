@@ -135,7 +135,7 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
 - [x] Verify it: /check verify E2 missing modality evaluation
 - [x] Test it: /test E2 missing modality evaluation
 - [x] Review it (fresh model): /check review E2 missing modality evaluation
-- [ ] Document it: /document E2 missing modality evaluation
+- [x] Document it: /document E2 missing modality evaluation
 
 ## Slice 4: Strategies
 
