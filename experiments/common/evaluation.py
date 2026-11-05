@@ -15,7 +15,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from common.cache import cache_dir, repo_path
+from common.cache import cache_dir, repo_path, sha256_file
 from common.data import (
     MODALITIES,
     REGION_LABELS,
@@ -30,7 +30,7 @@ from common.data import (
 from common.metrics import region_metrics
 from common.missing import PATTERNS, apply_pattern
 from common.model import predict
-from common.runlog import load_config, load_run
+from common.runlog import config_hash, load_config, load_run
 
 REPO = Path(__file__).resolve().parents[2]
 # order matters; whole model.py and data.py are left out on purpose, E4 changes the input channels
@@ -47,14 +47,17 @@ METRIC_COLUMNS = ["eval_id", "case", "subject", "pattern_id", "pattern_name", "r
 # every key is present in every eval run.json (null where not yet known); spec 0004, Data model
 EVAL_RUN_KEYS = (
     "eval_id", "status", "reason", "quick", "fold", "n_cases", "source_run", "source_run_id",
-    "source_config_hash", "source_best_iteration", "source_seed", "splits_sha256",
-    "protocol_hash", "config_hash", "git_commit", "git_dirty", "seed", "device", "gpu",
+    "source_config_hash", "source_best_iteration", "source_best_sha256", "source_seed",
+    "splits_sha256", "protocol_hash", "config_hash", "git_commit", "git_dirty", "seed", "device", "gpu",
     "versions", "rerun_reason", "superseded", "resumes", "predict_seconds", "metric_seconds",
     "wall_time_s", "peak_vram_reserved_mib",
 )
 # a resume stops if any of these differs from run.json (AC-5); paths are not here, Kaggle moves them
 RESUME_KEYS = ("git_commit", "config_hash", "protocol_hash", "source_run_id",
-               "source_config_hash", "source_best_iteration", "device", "gpu")
+               "source_config_hash", "source_best_iteration", "source_best_sha256", "device", "gpu")
+# a test eval must hold the same value as its val eval on each of these (AC-7, AC-16)
+VAL_MATCH_KEYS = ("protocol_hash", "config_hash", "source_best_iteration", "source_best_sha256",
+                  "splits_sha256")
 MAX_MEAN_DICE_DIFF = 0.001  # AC-9, per region
 MAX_CASE_DICE_DIFF = 0.01  # AC-9, per (case, region)
 
@@ -66,6 +69,15 @@ class GuardError(Exception):
 def identity(image, pattern_id):
     """The default image_hook: no change."""
     return image
+
+
+def source_pins(run_dir, rec):
+    """The run.json fields that tie an eval to the exact E1 weights and split file (AC-7)."""
+    run_dir = Path(run_dir)
+    splits = load_config(run_dir / "config.toml")["data"]["splits_csv"]
+    return {"source_best_iteration": rec["best_iteration"],
+            "source_best_sha256": sha256_file(run_dir / "checkpoints" / "best.pt"),
+            "splits_sha256": sha256_file(repo_path(splits))}
 
 
 def eval_cases(cfg, eval_cfg, rec, fold):
@@ -234,6 +246,11 @@ def check_rules(eval_dir, source_run):
         errors.append(f"status is {rec['status']!r}, not 'ok'")
     if rec["quick"] is not False:
         errors.append("a quick run")
+    config = eval_dir / "config.toml"
+    if not config.is_file():
+        return errors + [f"{config} missing"]
+    if config_hash(load_config(config)) != rec["config_hash"]:
+        errors.append("config.toml does not hash to the config_hash in run.json")
     path = eval_dir / "metrics.csv"
     if not path.is_file():
         return errors + [f"{path} missing"]
@@ -260,10 +277,10 @@ def check_rules(eval_dir, source_run):
         errors += _test_case_set(eval_dir, cases, source_run)
         val_dir = eval_dir.parent / f"{rec['source_run_id']}-val"
         if not (val_dir / "run.json").is_file():
-            errors.append(f"{val_dir} missing, no protocol_hash to compare")
+            errors.append(f"{val_dir} missing, no hashes to compare")
         else:
             val = load_run(val_dir)
-            errors += [f"{k} differs from the val eval's" for k in ("protocol_hash", "config_hash")
+            errors += [f"{k} differs from the val eval's" for k in VAL_MATCH_KEYS
                        if val[k] != rec[k]]
     return errors
 
@@ -272,7 +289,8 @@ def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol
     """Every failed rule of the test gate (AC-7), as error strings. Empty means the gate is open.
 
     rec is the E1 run.json and git is (commit, dirty) from git_info(). config is the config_hash
-    of this run: protocol seals only the default config.toml, so --config needs its own check. It
+    of this run: protocol seals only the default config.toml, so --config needs its own check.
+    source_pins() checks that the weights and the split file are still the ones val scored. It
     takes plain values, so E3 and E4 can reuse it. It reads no case. It stops accidents; it is not
     proof of one opening.
     """
@@ -295,7 +313,13 @@ def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol
     if val["protocol_hash"] != protocol:
         errors.append("protocol_hash differs from the val eval's: rerun val with --rerun-reason")
     if val["config_hash"] != config:
-        errors.append("config_hash differs from the val eval's: use the config val used")
+        errors.append("config_hash differs from the val eval's: use the config the val eval used")
+    try:
+        pins = source_pins(run_dir, rec)
+    except FileNotFoundError as e:
+        return errors + [f"{e.filename} missing, cannot compare it with the val eval"]
+    errors += [f"{k} differs from the val eval's: restore it or rerun val with --rerun-reason"
+               for k, v in pins.items() if val[k] != v]
     return errors
 
 

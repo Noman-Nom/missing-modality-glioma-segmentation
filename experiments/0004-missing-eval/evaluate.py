@@ -19,7 +19,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common.cache import check_cache, repo_path, sha256_file
+from common.cache import check_cache
 from common.evaluation import (
     EVAL_RUN_KEYS,
     GuardError,
@@ -29,6 +29,7 @@ from common.evaluation import (
     metrics_writer,
     prepare_folder,
     protocol_hash,
+    source_pins,
     sweep,
 )
 from common.model import build_model
@@ -130,9 +131,8 @@ def main(argv=None):
     fields = {
         "eval_id": eval_id, "quick": a.quick, "fold": a.fold, "n_cases": len(cases),
         "source_run": str(a.run), "source_run_id": rec["run_id"],
-        "source_config_hash": rec["config_hash"], "source_best_iteration": rec["best_iteration"],
-        "source_seed": rec["seed"], "protocol_hash": protocol,
-        "splits_sha256": sha256_file(repo_path(cfg["data"]["splits_csv"])),
+        "source_config_hash": rec["config_hash"], "source_seed": rec["seed"],
+        "protocol_hash": protocol, **source_pins(a.run, rec),
         "config_hash": config_hash(saved), "git_commit": commit, "git_dirty": dirty,
         "seed": eval_cfg["seed"], "device": device.type, "versions": versions(),
         "gpu": torch.cuda.get_device_name() if device.type == "cuda" else None}

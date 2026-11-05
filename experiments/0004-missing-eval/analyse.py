@@ -4,8 +4,9 @@
 Reads only metrics.csv, config.toml and run.json, and writes stats.csv (90 rows), friedman.csv
 (18 rows), marginal.csv (24 rows) and verdict.txt. Uses no GPU. Exit 1, writing nothing, unless
 run.json is there, its status is ok, no (case, pattern, region) row is missing and the case count
-equals n_cases, checked in that order. The rules are the Statistics protocol of the spec: changing
-this file changes protocol_hash, so it costs a val rerun.
+equals n_cases, checked in that order, and then unless config.toml still hashes to the config_hash
+in run.json. The rules are the Statistics protocol of the spec: changing this file changes
+protocol_hash, so it costs a val rerun.
 """
 import argparse
 import csv
@@ -17,7 +18,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.data import MODALITIES, REGIONS
 from common.missing import BIT, PATTERNS
-from common.runlog import load_config, load_run
+from common.runlog import config_hash, load_config, load_run
 from common.stats import bootstrap_ci, bootstrap_indices, friedman, holm, paired_wilcoxon
 
 STATS_COLUMNS = ["metric", "region", "pattern_id", "pattern_name", "n", "mean", "median",
@@ -163,7 +164,10 @@ def main(argv=None):
     if df["case"].nunique() != rec.get("n_cases"):
         raise SystemExit(f"ERROR: metrics.csv has {df['case'].nunique()} cases, "
                          f"expected n_cases {rec.get('n_cases')}")
-    cfg = load_config(a.eval / "config.toml")["eval"]
+    cfg = load_config(a.eval / "config.toml")
+    if config_hash(cfg) != rec.get("config_hash"):
+        raise SystemExit("ERROR: config.toml does not hash to the config_hash in run.json")
+    cfg = cfg["eval"]
     indices = bootstrap_indices(df["case"].nunique(), cfg["bootstrap_resamples"], cfg["seed"])
     keys = [(m, g) for m in METRICS for g in REGIONS]
     stats = [r for m, g in keys for r in stats_rows(df, m, g, indices)]

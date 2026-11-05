@@ -21,7 +21,7 @@ from common.evaluation import (
     protocol_hash,
 )
 from common.missing import PATTERNS
-from common.runlog import RunRecord, dump_config, load_config, load_run
+from common.runlog import RunRecord, config_hash, dump_config, load_config, load_run
 from conftest import only_run, write_case, write_splits
 from scipy.stats import chi2
 
@@ -130,6 +130,9 @@ def test_run_record_holds_the_spec_keys_and_the_source(quick_eval, e1_run):
     assert (rec["status"], rec["fold"], rec["n_cases"]) == ("ok", "val", 2)
     assert rec["source_run_id"] == source["run_id"]
     assert rec["source_config_hash"] == source["config_hash"]
+    assert rec["source_best_iteration"] == source["best_iteration"]
+    best = hashlib.sha256((e1_run / "checkpoints" / "best.pt").read_bytes()).hexdigest()
+    assert rec["source_best_sha256"] == best
     assert rec["predict_seconds"] > 0 and rec["metric_seconds"] > 0
 
 
@@ -260,7 +263,8 @@ def write_toy_metrics(path, drop=None, dice=falls_by_a_tenth, hd95=lambda case, 
     (case, pattern). n_cases defaults to cases, so a toy folder is finished unless a test says so."""
     dump_config(load_config(E2 / "config.toml"), path.parent / "config.toml")
     (path.parent / "run.json").write_text(json.dumps(
-        {"status": status, "n_cases": cases if n_cases is None else n_cases}))
+        {"status": status, "n_cases": cases if n_cases is None else n_cases,
+         "config_hash": config_hash(load_config(path.parent / "config.toml"))}))
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
@@ -643,7 +647,8 @@ def test_table_star_follows_alpha_in_the_eval_folder_config(tmp_path, alpha, sta
     edit_csv(ev / "stats.csv", set_p)
     cfg = load_config(ev / "config.toml")
     dump_config(cfg | {"eval": cfg["eval"] | {"alpha": alpha}}, ev / "config.toml")
-    edit_json(ev, fold="val", seed=42, eval_id="x", config_hash="c", git_commit="g")
+    edit_json(ev, fold="val", seed=42, eval_id="x", git_commit="g",
+              config_hash=config_hash(load_config(ev / "config.toml")))
     assert make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)]) == 0
     tex = (tmp_path / "0004-missing-eval-val-dice.tex").read_text()
     assert (make_table.STAR in tex) == starred
@@ -1070,7 +1075,8 @@ def test_resume_with_every_pair_done_only_finishes(e1_run, quick_eval, tmp_path)
 
 
 @pytest.mark.parametrize("key", ["git_commit", "config_hash", "protocol_hash", "source_run_id",
-                                 "source_config_hash", "source_best_iteration", "device", "gpu"])
+                                 "source_config_hash", "source_best_iteration",
+                                 "source_best_sha256", "device", "gpu"])
 def test_resume_mismatch_is_refused_before_any_cut(e1_run, tmp_path, monkeypatch, key, capsys):
     folder = stop_after(e1_run, tmp_path, 7, monkeypatch)
     edit_json(folder, **{key: "other"})
@@ -1093,6 +1099,41 @@ def broken(val_eval, e1_run, tmp_path):
     run = tmp_path / "e1"
     shutil.copytree(e1_run, run)
     return out / val_eval.name, run
+
+
+# covers: AC-16. analyse.py reads alpha and the resamples from this copy, so a hand edit must show.
+def test_rules_catch_a_hand_edited_eval_config(val_eval, e1_run, tmp_path):
+    folder = tmp_path / "ev"
+    shutil.copytree(val_eval, folder)
+    cfg = load_config(folder / "config.toml")
+    dump_config(cfg | {"eval": cfg["eval"] | {"alpha": 0.5}}, folder / "config.toml")
+    assert check_rules(folder, e1_run) == ["config.toml does not hash to the config_hash in run.json"]
+
+
+# covers: AC-16
+def test_rules_report_a_missing_eval_config(val_eval, e1_run, tmp_path):
+    folder = tmp_path / "ev"
+    shutil.copytree(val_eval, folder)
+    (folder / "config.toml").unlink()
+    assert any("config.toml missing" in e for e in check_rules(folder, e1_run))
+
+
+# covers: AC-12. Same edit, stopped at the script that reads the setting, with nothing written.
+def test_analyse_refuses_a_hand_edited_config(tmp_path):
+    write_toy_metrics(tmp_path / "metrics.csv")
+    cfg = load_config(tmp_path / "config.toml")
+    dump_config(cfg | {"eval": cfg["eval"] | {"alpha": 0.5}}, tmp_path / "config.toml")
+    assert_analysis_refused(tmp_path, "config.toml does not hash")
+
+
+# covers: AC-14
+def test_tables_refuse_a_hand_edited_config(quick_eval, tmp_path):
+    ev = tmp_path / "ev"
+    shutil.copytree(quick_eval, ev)
+    cfg = load_config(ev / "config.toml")
+    dump_config(cfg | {"eval": cfg["eval"] | {"alpha": 0.5}}, ev / "config.toml")
+    with pytest.raises(SystemExit, match="config.toml does not hash"):
+        make_table.main(["--eval", str(ev), "--out-dir", str(tmp_path)])
 
 
 def test_rules_pass_on_a_real_val_eval(val_eval, e1_run):
@@ -1289,6 +1330,39 @@ def test_gate_refuses_a_config_outside_the_seal(gate, capsys, tmp_path):
     assert_refused(run, out, "config_hash differs", capsys, "--open-test", "--config", str(other))
 
 
+# covers: AC-7. Weights swapped after val: the file differs, run.json does not, and the tie out
+# cannot see it, because it compares saved CSVs and loads no weights.
+def test_gate_refuses_a_swapped_checkpoint(gate, capsys):
+    out, _, run, _ = gate
+    with open(run / "checkpoints" / "best.pt", "ab") as f:
+        f.write(b"x")
+    assert_refused(run, out, "source_best_sha256 differs", capsys, "--open-test")
+
+
+# covers: AC-7
+def test_gate_refuses_a_changed_split_file(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    other = tmp_path / "other_splits.csv"
+    other.write_text("not the split val used\n")
+    cfg = load_config(run / "config.toml")
+    dump_config(cfg | {"data": cfg["data"] | {"splits_csv": str(other)}}, run / "config.toml")
+    assert_refused(run, out, "splits_sha256 differs", capsys, "--open-test")
+
+
+# covers: AC-7
+def test_gate_refuses_another_best_iteration(gate, capsys):
+    out, val, run, _ = gate
+    edit_json(val, source_best_iteration=-1)
+    assert_refused(run, out, "source_best_iteration differs", capsys, "--open-test")
+
+
+# covers: AC-7. A missing file is a refusal with a reason, not a crash.
+def test_gate_refuses_a_missing_checkpoint(gate, capsys):
+    out, _, run, _ = gate
+    (run / "checkpoints" / "best.pt").unlink()
+    assert_refused(run, out, "cannot compare it with the val eval", capsys, "--open-test")
+
+
 # covers: AC-7. The rule is on content, not on the path: a copy of the config val used still opens.
 def test_gate_opens_with_a_copy_of_the_config_val_used(gate, tmp_path):
     out, _, run, monkeypatch = gate
@@ -1343,6 +1417,13 @@ def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys):
     edit_json(out / f"{e1_run.name}-val", config_hash="old")
     assert any("config_hash differs" in e for e in check_rules(folder, run))
     edit_json(out / f"{e1_run.name}-val", config_hash=hash_of_val)
+
+    # so is one that scored other weights or another split file
+    for key in ("source_best_iteration", "source_best_sha256", "splits_sha256"):
+        kept = load_run(out / f"{e1_run.name}-val")[key]
+        edit_json(out / f"{e1_run.name}-val", **{key: "old"})
+        assert any(f"{key} differs" in e for e in check_rules(folder, run))
+        edit_json(out / f"{e1_run.name}-val", **{key: kept})
     assert run_test(run, out, "--open-test") == 2  # one finished run (AC-6)
     assert "finished" in capsys.readouterr().out
     assert run_test(run, out, "--open-test", "--rerun-reason", "synthetic") == 0
