@@ -5,7 +5,8 @@ Writes 0004-missing-eval-<fold>-dice.tex, -hd95.tex, -marginal.tex and -heatmap.
 typed by hand. Reads only the analysis CSVs, run.json, and alpha from config.toml in the eval folder
 (the value analyse.py uses for the verdict). Exit 1, writing nothing, unless run.json is there, its
 status is ok, both analysis CSVs are there with their row counts and every n in stats.csv equals
-n_cases, checked in that order. The four files compile through writing/tracer/e2-preview.tex.
+n_cases, checked in that order, and then unless config.toml hashes to config_hash in run.json.
+The four files compile through writing/tracer/e2-preview.tex.
 """
 import argparse
 import csv
@@ -15,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.data import MODALITIES, REGIONS
 from common.missing import PATTERNS
-from common.runlog import load_config, load_run
+from common.runlog import config_hash, load_config, load_run
 
 REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "writing" / "tables"
@@ -224,9 +225,12 @@ def main(argv=None):
     ap.add_argument("--out-dir", type=Path, default=OUT)
     a = ap.parse_args(argv)
     rec = finished_run(a.eval)
-    alpha = load_config(a.eval / "config.toml")["eval"]["alpha"]
     stats, marginal = read_stats(a.eval), read_marginal(a.eval)
     check_n(stats, rec)
+    cfg = load_config(a.eval / "config.toml")
+    if config_hash(cfg) != rec.get("config_hash"):
+        raise SystemExit("ERROR: config.toml does not hash to the config_hash in run.json")
+    alpha = cfg["eval"]["alpha"]
     files = {"dice": dice_table(stats, rec, alpha), "hd95": hd95_table(stats, rec, alpha),
              "marginal": marginal_table(marginal, stats, rec), "heatmap": heatmap(stats, rec)}
     a.out_dir.mkdir(parents=True, exist_ok=True)
