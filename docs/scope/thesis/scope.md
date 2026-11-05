@@ -19,7 +19,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 3  | Subject-level split and leakage test                 | Slice 2    | done    |
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | done |
-| 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | in-progress |
+| 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | done |
 | 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | planned |
 | 8  | Reduced-label study (E5), optional                   | Slice 5    | planned |
 | 9  | Self-supervised pilot (E6), optional                 | Slice 5    | planned |
@@ -118,7 +118,7 @@ Code in `experiments/common/` (`cache.py`, `training.py`, `data.py`), `experimen
 - [x] Verify it: /check verify E1 complete-input baseline
 - [x] Test it: /test E1 complete-input baseline
 
-### 6. Missing-modality evaluation, 15 patterns (E2) · GA (in-progress)
+### 6. Missing-modality evaluation, 15 patterns (E2) · GA (done)
 Measure how the baseline degrades under every one of the 15 non empty modality subsets (RQ1). Spec: [0004](../../specs/thesis/0004-missing-modality-evaluation/index.md).
 Done when: every pattern is scored per region (Dice, HD95) on the same val subjects, the test path is proven on synthetic cases with the real test fold still sealed, the protocol is fixed before any test fold number is seen, and the tables come from a script.
 Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-missing-eval/`.

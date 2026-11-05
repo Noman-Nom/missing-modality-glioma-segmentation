@@ -1,7 +1,7 @@
 # 0004. Missing modality evaluation (E2): score the frozen E1 model on all 15 patterns
 
 **Date**: 2026-11-04
-**Status**: In Progress
+**Status**: Accepted
 
 ## Summary
 
