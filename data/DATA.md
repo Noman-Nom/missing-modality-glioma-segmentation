@@ -43,7 +43,7 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 
 ## E1 model on Kaggle (for E2, ADR 0002)
 
-- **Where.** Private Kaggle dataset `muhammadnomanned/brats-e1-run`. To create: not uploaded yet (2026-11-04), the steps are in `experiments/0004-missing-eval/KAGGLE.md`. Never make it public.
+- **Where.** Private Kaggle dataset `muhammadnomanned/brats-e1-run`. Uploaded, and `isPrivate` true in its Kaggle metadata (checked 2026-11-05). The steps are in `experiments/0004-missing-eval/KAGGLE.md`. Never make it public.
 - **What.** One file, `e1-run.tar.bin`, 51,599,360 bytes: an uncompressed tar of `config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` from run `20261103-023817-f9b3afb6`. SHA256 of `best.pt`: `975f56a148af15c01714f397aa4f248f518adda11d55e0de8f8155517d521a58`.
 - **Why a tar.** It keeps the `checkpoints/` folder, and stops Kaggle from touching the files on upload, the same reason as the BraTS tar above.
 - **What it holds.** Model weights and case IDs with their scores, no images. The weights were trained on BraTS data, so the BraTS terms still to confirm above apply here too.
