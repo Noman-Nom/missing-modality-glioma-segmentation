@@ -23,6 +23,7 @@ from common.missing import apply_pattern
 from common.model import build_model, predict
 from common.runlog import load_config, load_run
 from common.seed import set_seed
+from common.strategies import strategy_hooks
 
 COLUMNS = ["run_id", "case", "subject", "region", "dice", "hd95_mm", "sensitivity", "precision",
            "gt_empty", "pred_empty"]
@@ -55,6 +56,7 @@ def main(argv=None):
         print("ERROR: cache guard, nothing evaluated:\n" + "\n".join("  " + e for e in errors[:20]))
         return 2
 
+    image_hook = strategy_hooks(cfg)["image_hook"]
     set_seed(cfg["seed"])
     device = torch.device("cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu")
     model = build_model(cfg).to(device)
@@ -65,7 +67,7 @@ def main(argv=None):
     tf = cached_eval_transforms(cfg)
     for item in cached_items(cache_dir(cfg), cases):
         d = tf(item)
-        pred = predict(model, apply_pattern(d["image"], PATTERN), cfg, device)
+        pred = predict(model, image_hook(apply_pattern(d["image"], PATTERN), PATTERN), cfg, device)
         for ri, region in enumerate(REGIONS):
             m = region_metrics(pred[ri], d["label"][ri], d["pixdim"])
             assert not math.isnan(m["dice"]) and not math.isnan(m["hd95_mm"])

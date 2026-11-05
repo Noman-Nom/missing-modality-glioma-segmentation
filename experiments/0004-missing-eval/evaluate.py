@@ -43,6 +43,7 @@ from common.runlog import (
     versions,
 )
 from common.seed import set_seed
+from common.strategies import strategy_hooks
 from common.training import failed_reason
 
 EXP = Path(__file__).resolve().parent
@@ -168,6 +169,7 @@ def main(argv=None):
         model.eval()
         with open(metrics, "a", newline="") as f:
             sweep(model, cases, cfg, device, metrics_writer(f, eval_id), done=done,
+                  image_hook=strategy_hooks(cfg)["image_hook"],
                   progress=progress_recorder(run, device))
     except Exception as e:  # noqa: BLE001 (any failure must end as status failed, AC-10)
         run.update(status="failed", reason=failed_reason(e))

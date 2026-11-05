@@ -1,7 +1,7 @@
 """The shared training loop, validation, checkpoints and run record (spec 0003, AC-10, AC-17).
 
-E1 trains through train() with the identity batch_hook; E3 and E4 reuse it unchanged through
-batch_hook and val_patterns. Trainer (one step per iteration) is also what memory_test.py runs. last.pt holds
+E1 trains through train() with the no change hooks; E3 and E4 run the same loop with the hooks of
+common/strategies.py, batch_hook in training and image_hook at val (spec 0005). Trainer (one step per iteration) is also what memory_test.py runs. last.pt holds
 the full training state, and train(resume=True) continues a failed, interrupted or crashed run
 from it (AC-11, AC-12).
 """
@@ -29,6 +29,7 @@ from common.missing import apply_pattern
 from common.model import build_model, predict
 from common.runlog import RunRecord, config_hash, dump_config, git_info, load_run, versions
 from common.seed import determinism_state, set_seed
+from common.strategies import keep_batch, keep_image, strategy_problems
 
 # every key is present in every E1 run.json (null where not yet known); spec 0003, run.json keys
 RUN_KEYS = (
@@ -60,15 +61,10 @@ class NonFiniteLoss(RuntimeError):
         self.failure = failure
 
 
-def identity(batch, rng):
-    """The E1 batch hook: changes nothing and draws nothing."""
-    return batch
-
-
 def check_config(cfg):
     """Problems that must stop a run before it starts (exit 2), as strings; empty = fine."""
     t = cfg["train"]
-    problems = []
+    problems = strategy_problems(cfg)
     if t["iterations"] % t["val_every"]:
         problems.append(f"iterations {t['iterations']} is not a multiple of val_every "
                         f"{t['val_every']}")
@@ -133,9 +129,10 @@ def loss_window(losses):
     return w, sum(losses[:w]) / w, sum(losses[-w:]) / w
 
 
-def validate(model, val_cases, patterns, cfg, device):
+def validate(model, val_cases, patterns, cfg, device, image_hook=keep_image):
     """Dice per (pattern, case, region) on the val cases, same inference as evaluation.
 
+    image_hook(image, pattern_id) runs after apply_pattern(), as in sweep().
     Returns rows {pattern_id, case, region, dice, gt_empty, pred_empty}. Dice only, no HD95.
     """
     if device.type == "cuda":
@@ -146,7 +143,7 @@ def validate(model, val_cases, patterns, cfg, device):
     for item in cached_items(cache_dir(cfg), val_cases):
         d = tf(item)
         for pid in patterns:
-            pred = predict(model, apply_pattern(d["image"], pid), cfg, device)
+            pred = predict(model, image_hook(apply_pattern(d["image"], pid), pid), cfg, device)
             for ri, region in enumerate(REGIONS):
                 m = region_metrics(pred[ri], d["label"][ri], d["pixdim"], with_hd95=False)
                 rows.append({"pattern_id": pid, "case": d["case"], "region": region,
@@ -219,7 +216,7 @@ class Trainer:
         self.hook_rng = np.random.default_rng(cfg["seed"] + 1)
         self.skipped = 0
 
-    def step(self, it, batch_hook=identity, inject_at=None):
+    def step(self, it, batch_hook=keep_batch, inject_at=None):
         """One training iteration. Returns loss, dice_loss, bce_loss, lr (the one applied),
         grad_norm (total norm before the clip), seconds (the whole step, data wait included)
         and data_wait. A non finite loss raises NonFiniteLoss with .failure filled (AC-12)."""
@@ -373,9 +370,9 @@ def keep_rows(path, last_iteration):
     return rows
 
 
-def _val_point(tr, rec, run_dir, it, val_patterns, prog, row, write_row):
+def _val_point(tr, rec, run_dir, it, val_patterns, image_hook, prog, row, write_row):
     v0 = time.time()
-    rows = validate(tr.model, rec.data["val_cases"], val_patterns, tr.cfg, tr.device)
+    rows = validate(tr.model, rec.data["val_cases"], val_patterns, tr.cfg, tr.device, image_hook)
     per, score = selection_score(rows)
     seconds = time.time() - v0
     prog.seg_seconds += seconds
@@ -401,7 +398,7 @@ def _val_point(tr, rec, run_dir, it, val_patterns, prog, row, write_row):
     rec.write()
 
 
-def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, val_patterns, prog):
+def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, image_hook, val_patterns, prog):
     t = cfg["train"]
     tr = Trainer(cfg, device, rec.data["train_cases"], gen)
     if resume_state is not None:
@@ -429,7 +426,7 @@ def _loop(cfg, rec, run_dir, device, gen, resume_state, batch_hook, val_patterns
                    round(s["seconds"], 4)]
             rec.update(iterations=it, scaler_skipped_steps=tr.skipped)
             if it % t["val_every"] == 0:
-                _val_point(tr, rec, run_dir, it, val_patterns, prog, row, write_row)
+                _val_point(tr, rec, run_dir, it, val_patterns, image_hook, prog, row, write_row)
             else:
                 write_row(row + [""] * 4)
 
@@ -499,7 +496,8 @@ def _resume_record(run_dir, state, commit, dirty):
 
 
 def train(cfg, run_dir, run_id, train_cases, val_cases, *, device, quick=False,
-          batch_hook=identity, val_patterns=(SELECTION_PATTERN,), resume=False):
+          batch_hook=keep_batch, image_hook=keep_image, val_patterns=(SELECTION_PATTERN,),
+          resume=False):
     """Train one run into run_dir and keep its run.json current. Returns the exit code:
     0 ok, 1 failed (OOM, non finite loss), 130 Ctrl+C. Any other error writes status failed,
     then raises. resume=True continues the run in run_dir from its last.pt (the caller has run
@@ -532,7 +530,8 @@ def train(cfg, run_dir, run_id, train_cases, val_cases, *, device, quick=False,
             warnings.simplefilter("always")
             # expected when GradScaler skips the first step; not a nondeterminism warning
             warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step")
-            _loop(cfg, rec, run_dir, device, gen, state, batch_hook, val_patterns, prog)
+            _loop(cfg, rec, run_dir, device, gen, state, batch_hook, image_hook, val_patterns,
+                  prog)
         rec.update(status="ok")
     except torch.cuda.OutOfMemoryError as e:
         rec.update(status="failed", reason=f"CUDA out of memory: {str(e).splitlines()[0]}",

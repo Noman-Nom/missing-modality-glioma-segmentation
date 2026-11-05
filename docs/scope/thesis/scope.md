@@ -20,7 +20,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | done |
 | 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | done |
-| 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | planned |
+| 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | in-progress |
 | 8  | Reduced-label study (E5), optional                   | Slice 5    | planned |
 | 9  | Self-supervised pilot (E6), optional                 | Slice 5    | planned |
 | 10 | Cross-dataset evaluation (E7), only if independent   | Slice 5    | planned |
@@ -139,11 +139,21 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
 
 ## Slice 4: Strategies
 
-### 7. Modality dropout (E3) and presence indicator (E4) · needs a decision · GA (planned)
-Compare simple robustness strategies against zero fill, on the same subjects, splits, metrics and seeds (RQ2).
+### 7. Modality dropout (E3) and presence indicator (E4) · GA (in-progress)
+Compare simple robustness strategies against zero fill, on the same subjects, splits, metrics and seeds (RQ2). Spec: [0005](../../specs/thesis/0005-modality-dropout-presence-indicator/index.md). Code in `experiments/common/strategies.py`, `experiments/0005-strategies/`.
 Done when: each strategy is trained and evaluated on all 15 patterns, any claimed benefit rests on a paired comparison, and the single joint test opening of E1, E3 and E4 has run (this feature owns it, through the sealed test path of E2).
 
-- [ ] Design it (spec): /architect modality dropout and presence indicator
+- [x] Design it (spec): /architect modality dropout and presence indicator
+- [ ] Build it: /develop E3 and E4 strategies
+  - [x] Strategies on the one path: hooks, `PresenceUNet`, `e3.toml`, `e4.toml`, the seal test (AC-1 to AC-11)
+  - [ ] Comparison: `compare.py`, H2 verdict, tables (AC-15 to AC-19)
+  - [ ] Checks and records: `check_strategy.py`, `KAGGLE.md`, ADR 0002, `data/DATA.md`, spec notes (AC-12, AC-14, AC-22, AC-23)
+  - [ ] Human run: E3 and E4 on the Kaggle T4, val evals, val comparison (AC-13)
+  - [ ] Human run: the joint test opening of E1, E3 and E4 (AC-20, AC-21)
+- [ ] Verify it: /check verify E3 and E4 strategies
+- [ ] Test it: /test E3 and E4 strategies
+- [ ] Review it (fresh model): /check review E3 and E4 strategies
+- [ ] Document it: /document E3 and E4 strategies
 
 ## Slice 5: Extensions (optional)
 
