@@ -103,3 +103,6 @@ Milestones 1 to 3 of 5 built 2026-11-06 on branch `feat/e3-e4-strategies` (build
 - `0005-strategies/KAGGLE.md` (AC-13, AC-14, AC-20 to AC-22): every human step in order, with `R1`, `R3` and `R4` at the top. Its notebook cells run commands through `sh()`, which stops the notebook on a failure, because a plain `!` line does not. That was tested in a real executed notebook (nbconvert, not Kaggle). The tar block was dry run on fake files, and a test proves the gate opens on the tar's four run files with the val eval in another folder.
 - Records: ADR 0002, `data/DATA.md`, `experiments/AGENTS.md`, dated notes in specs 0003 and 0004.
 - Not run yet: E3 and E4 on the T4, the val comparison, and the joint test opening (the human runs these).
+
+## K. Literature tools (ADR 0003)
+`0006-literature/fetch_papers.py`, built 2026-11-07: `search` asks OpenAlex and logs to `docs/literature/search-log.csv` and `candidates.csv`; `download` keeps real open access PDFs in `~/literature-pdfs`, outside git, with a text copy. Closed papers get `no_open_copy`, for the human. Toy tests in `tests/test_fetch_papers.py`, plus one live trial in a scratch folder. No paper has been reviewed yet.
