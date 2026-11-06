@@ -276,8 +276,9 @@ def test_a_missing_file_fails_and_does_not_crash(pair, capsys, folder, name):
 def test_the_counts_add_up_and_each_pattern_is_printed(pair, capsys):
     assert pair.check() == 0
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == len(PATTERNS) + 2
-    counts = [int(x.split()[-2]) for x in lines[:len(PATTERNS)]]
+    assert len(lines) == len(PATTERNS) + 3
+    assert lines[0] == "Expected draws, recomputed from the seed, not read from the run:"
+    counts = [int(x.split()[-2]) for x in lines[1:len(PATTERNS) + 1]]
     assert sum(counts) == 30 * 2
 
 

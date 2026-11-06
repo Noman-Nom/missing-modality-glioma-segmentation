@@ -18,6 +18,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -112,11 +113,17 @@ def eval_problems(eval_dirs, run_dirs, fold):
                if recs[m].get(k) != recs["e1"].get(k)]
     errors += [f"{m} eval: case set differs from E1" for m in MODELS[1:]
                if set(frames[m]["case"]) != set(frames["e1"]["case"])]
+    # check_rules refuses a NaN but not an infinity, which would turn into a NaN p value below
+    for m, df in frames.items():
+        n = sum(int(np.isinf(pd.to_numeric(df[c], errors="coerce")).sum()) for c in METRICS)
+        if n:
+            errors.append(f"{m} eval: {n} infinite Dice or HD95 value(s)")
     return errors, recs, frames
 
 
-def val_compare_problems(out, run_ids, hashed):
-    """AC-16: a test comparison needs the finished val comparison of the same runs and code."""
+def val_compare_problems(out, run_ids, hashed, eval_recs):
+    """AC-16: a test comparison needs the finished val comparison of the same runs, code, protocol
+    and splits. eval_recs are the test evals, empty if they could not be read."""
     folder = out / "compare-val"
     if not (folder / "run.json").is_file():
         return [f"{folder / 'run.json'} missing: run compare.py --fold val first"]
@@ -124,8 +131,14 @@ def val_compare_problems(out, run_ids, hashed):
     errors = []
     if rec.get("status") != "ok":
         errors.append(f"val compare: status is {rec.get('status')!r}, not 'ok'")
+    if rec.get("fold") != "val":
+        errors.append(f"val compare: fold is {rec.get('fold')!r}, not 'val'")
     errors += [f"val compare: {m}_run_id differs" for m in MODELS
                if rec.get(f"{m}_run_id") != run_ids[m]]
+    if eval_recs:
+        errors += [f"val compare: {k} differs from the test evals'"
+                   for k in ("protocol_hash", "splits_sha256")
+                   if rec.get(k) != eval_recs["e1"].get(k)]
     if rec.get("compare_hash") != hashed:
         errors.append("compare_hash differs from the val compare's: "
                       "compare val again with --rerun-reason")
@@ -256,7 +269,7 @@ def guards(a, run_dirs, out):
     errors += more
     val_recs = {}
     if a.fold == "test":
-        errors += val_compare_problems(out, run_ids, compare_hash())
+        errors += val_compare_problems(out, run_ids, compare_hash(), eval_recs)
         val_dirs = {m: parents[m] / f"{run_ids[m]}-val" for m in MODELS}
         val_recs = {m: load_run(d) for m, d in val_dirs.items() if (d / "run.json").is_file()}
     errors += folder_problems(out / f"compare-{a.fold}", a.rerun_reason)

@@ -71,6 +71,7 @@ def main(argv=None):
     if errors:
         return 1
     counts = draw_counts(rec["seed"], rec["iterations"], cfg["train"]["batch_size"])
+    print("Expected draws, recomputed from the seed, not read from the run:")
     for p in PATTERNS:
         print(f"pattern {p:2d} {PATTERNS[p].name}: {counts[p]} draws")
     print(f"resumes: {len(rec['resumes'])}")

@@ -152,7 +152,7 @@ Done when: each strategy is trained and evaluated on all 15 patterns, any claime
   - [ ] Human run: the joint test opening of E1, E3 and E4 (AC-20, AC-21)
 - [ ] Verify it: /check verify E3 and E4 strategies
 - [ ] Test it: /test E3 and E4 strategies
-- [ ] Review it (fresh model): /check review E3 and E4 strategies
+- [x] Review it (fresh model): /check review E3 and E4 strategies
 - [ ] Document it: /document E3 and E4 strategies
 
 ## Slice 5: Extensions (optional)

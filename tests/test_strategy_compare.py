@@ -444,6 +444,16 @@ def other_cases(w):
         out.writerows((c, g, w.dice["e3"](c, 1, g)) for c in other for g in REGIONS)
 
 
+def blank_dice(w):
+    write_metrics(w.eval_dir("e3", "val") / "metrics.csv", VAL,
+                  lambda c, p, g: "" if p == 2 else w.dice["e3"](c, p, g), w.hd95["e3"])
+
+
+def infinite_hd95(w):
+    write_metrics(w.eval_dir("e3", "val") / "metrics.csv", VAL, w.dice["e3"],
+                  lambda c, p, g: math.inf if p == 2 else w.hd95["e3"](c, p, g))
+
+
 GUARDS = {
     "run not ok": (set_run("status", "failed"), "e3 run: status is 'failed'"),
     "quick run": (set_run("quick", True), "e3 run: a quick run"),
@@ -464,6 +474,8 @@ GUARDS = {
     "splits differ": (set_eval("splits_sha256", "q"), "e4 eval: splits_sha256 differs"),
     "eval gpu differs": (set_eval("gpu", "P100"), "e4 eval: gpu differs"),
     "other case set": (other_cases, "e3 eval: case set differs from E1"),
+    "blank dice": (blank_dice, "e3 eval: 30 row(s) with no Dice or HD95"),
+    "infinite hd95": (infinite_hd95, "e3 eval: 30 infinite Dice or HD95 value(s)"),
 }
 
 
@@ -538,7 +550,10 @@ def test_stale_compare_hash_is_refused(world, capsys):
 
 
 @pytest.mark.parametrize(("key", "message"), [("e3_run_id", "e3_run_id differs"),
-                                              ("status", "status is 'x'")])
+                                              ("status", "status is 'x'"),
+                                              ("fold", "val compare: fold is 'x'"),
+                                              ("protocol_hash", "protocol_hash differs"),
+                                              ("splits_sha256", "splits_sha256 differs")])
 def test_val_comparison_of_other_runs_is_refused(world, capsys, key, message):
     finish_val(world)
     world.edit(world.folder() / "run.json", **{key: "x"})
