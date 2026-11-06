@@ -61,6 +61,8 @@ Rules:
 - The laptop stays the machine for development, `uv run pytest -q`, slow tests and `--quick` runs.
 - E2 also runs on the T4 (added 2026-11-04, spec 0004). Its check compares pattern 1 with E1's val Dice, so it has to use the GPU E1 used. The steps live in `experiments/0004-missing-eval/KAGGLE.md`. The notebook pins one exact commit instead of cloning the tip of `main`, because a resume refuses a different `git_commit`.
 - The E1 model weights sit in a **private** Kaggle dataset, `muhammadnomanned/brats-e1-run`, holding one file, `e1-run.tar.bin`. It holds `best.pt` and the three run files the sweep reads. Details in `data/DATA.md`.
+- E3 and E4 train and score on the T4 (added 2026-11-06, spec 0005), through the E1 and E2 scripts, from one pinned commit. The steps live in `experiments/0005-strategies/KAGGLE.md`. The joint test opening of E1, E3 and E4 runs there too.
+- The joint test inputs sit in a **private** Kaggle dataset, `muhammadnomanned/brats-joint-test`, holding one file, `joint-test.tar.bin`. It holds the three `best.pt` files, their run files and the three val evals. It does not exist yet: the human uploads it after the val comparison. Details in `data/DATA.md`.
 
 ## Rationale
 
@@ -83,13 +85,13 @@ The benchmark shows the same environment, the same losses and the same memory, w
 
 ## Follow-up
 
-- [ ] Record the Kaggle GPU quota and session limit in this ADR.
+- [ ] Record the Kaggle GPU quota and session limit in this ADR. Spec 0005 needs about 25 h, so do this before the E3 run. The human reported about 30 h a week on 2026-11-06. That is not read from the quota page yet, and the session limit is still unknown.
 - [ ] Add the driver version to `run.json` (AC-5) through a spec change; until then the KAGGLE.md GPU check cell prints it for the notes.
 - [ ] First E1 run on Kaggle passes the checks (AC-3, AC-4); then mark this ADR fully done. AC-4 passed 2026-11-03: run `20261103-023817-f9b3afb6`, in float32 (spec 0003 step 9), 0.600 s/iter on real data, 7.4 h of training and val, about 8.2 h for the whole notebook. This replaces the fp16 benchmark's 2.2 h as the planning number. AC-3 is still to confirm.
 - [ ] Confirm the BraTS 2023 terms allow a private copy on Kaggle; record it in `data/DATA.md`.
 
 ## References
 
-- `experiments/0003-baseline/gpu_bench.py`, `experiments/0003-baseline/KAGGLE.md`, `experiments/0004-missing-eval/KAGGLE.md`
+- `experiments/0003-baseline/gpu_bench.py`, `experiments/0003-baseline/KAGGLE.md`, `experiments/0004-missing-eval/KAGGLE.md`, `experiments/0005-strategies/KAGGLE.md`
 - ADR 0001 (environment, CUDA 13 build)
-- `docs/specs/thesis/0003-complete-input-baseline/`, `docs/specs/thesis/0004-missing-modality-evaluation/`
+- `docs/specs/thesis/0003-complete-input-baseline/`, `docs/specs/thesis/0004-missing-modality-evaluation/`, `docs/specs/thesis/0005-modality-dropout-presence-indicator/`

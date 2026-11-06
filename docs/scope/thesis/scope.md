@@ -147,7 +147,7 @@ Done when: each strategy is trained and evaluated on all 15 patterns, any claime
 - [ ] Build it: /develop E3 and E4 strategies
   - [x] Strategies on the one path: hooks, `PresenceUNet`, `e3.toml`, `e4.toml`, the seal test (AC-1 to AC-11)
   - [x] Comparison: `compare.py`, H2 verdict, tables (AC-15 to AC-19)
-  - [ ] Checks and records: `check_strategy.py`, `KAGGLE.md`, ADR 0002, `data/DATA.md`, spec notes (AC-12, AC-14, AC-22, AC-23)
+  - [x] Checks and records: `check_strategy.py`, `KAGGLE.md`, ADR 0002, `data/DATA.md`, spec notes (AC-12, AC-14, AC-22, AC-23)
   - [ ] Human run: E3 and E4 on the Kaggle T4, val evals, val comparison (AC-13)
   - [ ] Human run: the joint test opening of E1, E3 and E4 (AC-20, AC-21)
 - [ ] Verify it: /check verify E3 and E4 strategies

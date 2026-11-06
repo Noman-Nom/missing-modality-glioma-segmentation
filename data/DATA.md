@@ -48,6 +48,13 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 - **Why a tar.** It keeps the `checkpoints/` folder, and stops Kaggle from touching the files on upload, the same reason as the BraTS tar above.
 - **What it holds.** Model weights and case IDs with their scores, no images. The weights were trained on BraTS data, so the BraTS terms still to confirm above apply here too.
 
+## Joint test inputs on Kaggle (for the E1, E3 and E4 test opening, ADR 0002)
+
+- **Where.** Private Kaggle dataset `muhammadnomanned/brats-joint-test`. Not uploaded yet: it can only be built after the E3 and E4 val evals. The steps are in `experiments/0005-strategies/KAGGLE.md`, step 6. Never make it public. Record here the byte count, and that `isPrivate` is true, once it is up.
+- **What.** One file, `joint-test.tar.bin`: an uncompressed tar of `runs/<run id>/` (`config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` for each of E1, E3 and E4), `evals-e1/<E1 run id>-val/` and `evals/<E3 and E4 run id>-val/`. The notebook unpacks it into `/kaggle/working/joint/`, because `/kaggle/input` is read only and the sweep writes beside the val eval.
+- **Why a tar.** The same reason as the two above. The test gate proves through `source_best_sha256` that each `best.pt` came through byte equal.
+- **What it holds.** Model weights, case IDs with their scores, and no images. The BraTS terms still to confirm above apply here too.
+
 ## Splits (experiment 0001)
 
 `data/splits/splits.csv` (committed, IDs only). It holds all 1251 labelled training cases (`N_LABELLED_CASES` in `check_splits.py`). Seed 42, subject level, stratified by subject WT-volume tertile x any-empty-ET. The 219 official validation cases have no labels and are not used for scores.

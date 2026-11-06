@@ -1,13 +1,16 @@
 """Spec 0005: E3 and E4 through the real E1 and E2 scripts on synthetic cases, on CPU. Covers
-AC-2, AC-6, AC-7, AC-8, AC-9 and AC-10."""
+AC-2, AC-6, AC-7, AC-8, AC-9 and AC-10, and check_strategy.py on toy run folders, AC-12."""
 import csv
 import importlib.util
+import json
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import pytest
 import torch
-from common import evaluation, training
+from common import evaluation, strategies, training
+from common.missing import PATTERNS
 from common.runlog import dump_config, load_config, load_run
 from common.seed import set_seed
 from common.strategies import dropout_hook, keep_batch, strategy_hooks
@@ -16,6 +19,7 @@ from conftest import only_run
 REPO = Path(__file__).resolve().parents[1]
 E1 = REPO / "experiments" / "0003-baseline"
 E2 = REPO / "experiments" / "0004-missing-eval"
+E5 = REPO / "experiments" / "0005-strategies"
 
 
 def load(folder, name):
@@ -28,6 +32,7 @@ def load(folder, name):
 
 preprocess, train, evaluate = (load(E1, n) for n in ("preprocess", "train", "evaluate"))
 sweep_script = load(E2, "evaluate")
+check_strategy = load(E5, "check_strategy")
 
 
 @pytest.fixture(autouse=True)
@@ -156,3 +161,146 @@ def test_the_real_batch_passes_through_the_hook(setup, name):
     gen = set_seed(setup.cfg["seed"])
     tr = training.Trainer(setup.cfg, torch.device("cpu"), setup.train, gen)
     assert tr.step(1, strategy_hooks(setup.cfg)["batch_hook"])["loss"] > 0
+
+
+class Pair:
+    """A toy E1 run and a toy E3 run that pass AC-12, on disk. No model behind either."""
+
+    def __init__(self, root):
+        self.e1, self.run = root / "e1", root / "e3"
+        cfg = load_config(E1 / "config.toml")
+        cfg["train"]["batch_size"] = 2
+        for run, name in ((self.e1, None), (self.run, "dropout")):
+            run.mkdir()
+            dump_config(cfg | ({"strategy": {"name": name}} if name else {}), run / "config.toml")
+            (run / "run.json").write_text(json.dumps(
+                {"run_id": run.name, "status": "ok", "quick": False, "train_cases": ["a", "b"],
+                 "val_cases": ["c"], "cache_hash": "h", "seed": 42, "gpu": "Tesla T4",
+                 "iterations": 30, "versions": {"torch": "1"}, "resumes": []}))
+
+    def edit(self, **fields):
+        path = self.run / "run.json"
+        path.write_text(json.dumps(json.loads(path.read_text()) | fields))
+
+    def edit_config(self, change):
+        cfg = load_config(self.run / "config.toml")
+        change(cfg)
+        dump_config(cfg, self.run / "config.toml")
+
+    def check(self):
+        return check_strategy.main([str(self.run), "--e1", str(self.e1)])
+
+
+@pytest.fixture
+def pair(tmp_path):
+    return Pair(tmp_path)
+
+
+# covers: AC-12
+@pytest.mark.parametrize("name", ["dropout", "presence"])
+def test_the_check_passes_a_fair_run(pair, capsys, name):
+    pair.edit_config(lambda c: c["strategy"].update(name=name))
+    assert pair.check() == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[-2:] == [
+        "resumes: 0", f"PASS: e3, {name}, differs from E1 in the strategy alone"]
+    assert "WARNING" not in out and "FAIL" not in out
+
+
+def drop_strategy(cfg):
+    del cfg["strategy"]
+
+
+FAIRNESS_BREAKS = {
+    "status": (lambda p: p.edit(status="failed"), "status is 'failed'"),
+    "running": (lambda p: p.edit(status="running"), "status is 'running'"),
+    "quick": (lambda p: p.edit(quick=True), "a quick run"),
+    "no strategy": (lambda p: p.edit_config(drop_strategy), "strategy is None"),
+    "unknown strategy": (lambda p: p.edit_config(lambda c: c["strategy"].update(name="x")),
+                         "strategy is 'x'"),
+    "config": (lambda p: p.edit_config(lambda c: c["train"].update(lr=1.0)),
+               "config differs from E1 outside [strategy]"),
+    "extra section": (lambda p: p.edit_config(lambda c: c.update(extra={"a": 1})),
+                      "config differs from E1 outside [strategy]"),
+    **{k: (lambda p, k=k, v=v: p.edit(**{k: v}), f"{k} differs from E1")
+       for k, v in (("train_cases", ["a"]), ("val_cases", ["z"]), ("cache_hash", "x"),
+                    ("seed", 43), ("gpu", "Quadro"), ("iterations", 29))},
+}
+
+
+# covers: AC-12. One field changed at a time, each refused alone.
+@pytest.mark.parametrize("name", FAIRNESS_BREAKS)
+def test_the_check_refuses_each_difference(pair, capsys, name):
+    change, message = FAIRNESS_BREAKS[name]
+    change(pair)
+    assert pair.check() == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1 and lines[0].startswith(f"FAIL: {message}")
+    assert not any("PASS" in x or "draws" in x for x in lines)
+
+
+# covers: AC-12
+def test_the_check_prints_every_failure(pair, capsys):
+    pair.edit(status="failed", gpu="Quadro", seed=43)
+    assert pair.check() == 1
+    out = capsys.readouterr().out
+    for message in ("status is 'failed'", "gpu differs", "seed differs"):
+        assert message in out
+
+
+# covers: AC-12. The E1 folder must be plain E1, so removing [strategy] happens on one side only.
+def test_the_check_refuses_an_e1_folder_with_a_strategy(pair, capsys):
+    shutil.copy(pair.run / "config.toml", pair.e1 / "config.toml")
+    assert pair.check() == 1
+    assert "config differs from E1" in capsys.readouterr().out
+
+
+# covers: AC-12
+def test_different_versions_warn_and_pass(pair, capsys):
+    pair.edit(versions={"torch": "2"})
+    assert pair.check() == 0
+    out = capsys.readouterr().out
+    assert "WARNING: versions differ from E1" in out and "PASS" in out
+
+
+# covers: AC-12
+@pytest.mark.parametrize("folder", ["e1", "run"])
+@pytest.mark.parametrize("name", ["run.json", "config.toml"])
+def test_a_missing_file_fails_and_does_not_crash(pair, capsys, folder, name):
+    (getattr(pair, folder) / name).unlink()
+    assert pair.check() == 1
+    assert f"{name} missing" in capsys.readouterr().out
+
+
+# covers: AC-12
+def test_the_counts_add_up_and_each_pattern_is_printed(pair, capsys):
+    assert pair.check() == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == len(PATTERNS) + 2
+    counts = [int(x.split()[-2]) for x in lines[:len(PATTERNS)]]
+    assert sum(counts) == 30 * 2
+
+
+# covers: AC-12
+def test_the_number_of_resumes_is_printed(pair, capsys):
+    pair.edit(resumes=[{"from_iteration": 4}, {"from_iteration": 8}])
+    assert pair.check() == 0
+    assert "resumes: 2" in capsys.readouterr().out
+
+
+# covers: AC-12. The printed counts must be the draws training really made, not a second recipe.
+def test_the_counts_are_the_draws_a_real_run_made(setup, monkeypatch):
+    made = []
+    real = strategies.draw_patterns
+
+    def recording(rng, n):
+        drawn = real(rng, n)
+        made.extend(int(p) for p in drawn)
+        return drawn
+
+    monkeypatch.setattr(strategies, "draw_patterns", recording)
+    assert train.main(with_strategy(setup, "dropout")) == 0
+    rec = load_run(only_run(setup.out))
+    assert len(made) == rec["iterations"] * setup.cfg["train"]["batch_size"]
+    assert check_strategy.draw_counts(rec["seed"], rec["iterations"],
+                                      setup.cfg["train"]["batch_size"]) == Counter(made)

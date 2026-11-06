@@ -1373,6 +1373,24 @@ def test_gate_opens_with_a_copy_of_the_config_val_used(gate, tmp_path):
     assert run_test(run, out, "--open-test", "--config", str(copy)) == 0
 
 
+# covers: spec 0005, Joint test layout. Only the four run files of the tar, and the val eval moved
+# to another folder and another run path, must still open the gate and pass the rules.
+def test_gate_opens_on_the_joint_tar_layout(gate, e1_run, tmp_path):
+    _, val, run, monkeypatch = gate
+    monkeypatch.undo()
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    joint = tmp_path / "joint"
+    kept = joint / "runs" / e1_run.name
+    (kept / "checkpoints").mkdir(parents=True)
+    for name in ("config.toml", "run.json", "metrics_val.csv", "checkpoints/best.pt"):
+        shutil.copy(run / name, kept / name)
+    shutil.copytree(val, joint / "evals-e1" / val.name)
+    assert run_test(kept, joint / "evals-e1", "--open-test") == 0
+    folder = joint / "evals-e1" / f"{e1_run.name}-test"
+    assert load_run(folder)["status"] == "ok"
+    assert check_rules(folder, kept) == []
+
+
 def test_gate_refuses_open_test_on_val(gate, capsys):
     out, _, run, _ = gate
     assert evaluate.main(["--run", str(run), "--fold", "val", "--out", str(out), "--device", "cpu",

@@ -30,6 +30,7 @@ Expected: all pass, `slow` deselected, ruff clean. Tests live in `tests/test_com
 | AC-17 | 72 and 270 rows, exact columns and order; a toy case with a known `mean_diff`, Holm and CI; all zero `d` gives p 1; two runs byte identical; a finished folder refused, then accepted with a reason, old folder kept |
 | AC-18 | Toy CSVs reaching supported and not supported for a positive and a negative `mean_diff`, compared exactly with the template |
 | AC-19 | Captions and header comment present; val and test wording; each refusal leaves older `.tex` byte equal; the stub inputs the three files |
+| AC-22 | `test_gate_opens_on_the_joint_tar_layout` in `tests/test_missing_eval.py`: only the four run files of the tar, with the val eval moved to another folder, open the gate, and the test eval passes `check_rules` |
 | AC-23 | The folder set in `tests/test_experiment_scripts.py` holds `0005-strategies`; `common.strategies`, `common.model` and `common.training` each import first in a fresh process |
 
 ## Slow (the human runs these, no AI polling)
@@ -77,4 +78,6 @@ Expected: every check passes, and the opening is recorded by hand.
 | AC-20 | Commit order: the val compare is recorded before the test evals start; the test evals name the pinned commit |
 | AC-21 | The tracker records date, commit and the three eval ids |
 | AC-22 | `KAGGLE.md` has the `R1`, `R3`, `R4` variables and the *Joint test layout* paths |
+| AC-22 | In `KAGGLE.md`, every notebook cell that scores or checks runs through `sh()`, not a plain `!` line. Run once in a real executed notebook, a failed command must stop the notebook before the next cell (done 2026-11-06 with nbconvert, not on Kaggle) |
+| AC-22 | The step 6 tar lists `runs/`, `evals-e1/` and `evals/` as in *Joint test layout*, with no `last.pt` or `train_log.csv`, and the upload folder holds only the tar |
 | AC-22 | `KAGGLE.md`, ADR 0002, `data/DATA.md`, `experiments/AGENTS.md` and the dated notes in specs 0003 and 0004 updated |
