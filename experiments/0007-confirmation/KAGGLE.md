@@ -32,15 +32,17 @@ Each step happens before the next one starts:
 1. All 12 runs pass `check_baseline.py`. E3, E4 and E3b also pass `check_strategy.py` against the E1 run of the same seed.
 2. All 12 val evals pass `check_eval.py`.
 3. `check_confirmation.py` passes.
-4. `compare_seeds.py --fold val` passes.
-5. You write `docs/literature/test-gate.md`, and the gate passes.
-6. You commit the tree, and pin that commit.
-7. `compare_seeds.py --fold test --preflight` passes.
-8. On Kaggle, `preprocess.py --folds test` runs.
-9. On Kaggle, `evaluate.py --fold test --open-test` runs for all 12, from that commit.
-10. `compare_seeds.py --fold test` runs.
+4. You commit the tree, with `runs.toml` filled in.
+5. `compare_seeds.py --fold val` passes, on that clean tree.
+6. You write `docs/literature/test-gate.md`, and the gate passes.
+7. You commit the tree, and pin that commit.
+8. `compare_seeds.py --fold test --preflight` passes, and writes `preflight.json`.
+9. You upload the study files.
+10. On Kaggle, `preprocess.py --folds test` runs.
+11. On Kaggle, `evaluate.py --fold test --open-test` runs for all 12, from that commit.
+12. `compare_seeds.py --fold test` runs.
 
-Steps 1 to 7 never read a test case. **Step 8 does, and it cannot be taken back.** The numbers in this list are the 10 steps of AC-20, inside steps 3 to 6 of this file.
+Steps 1 to 9 never read a test case. **Step 10 does, and it cannot be taken back.** The numbers in this list are the 12 steps of AC-20, inside steps 3 to 6 of this file.
 
 ## Step 1: the tag and the Release (laptop, no GPU)
 
@@ -51,7 +53,7 @@ Before you tag, we recommend these four things:
 - `/check verify` and `/check review`, because a bug found after training costs up to 114 h of GPU time to redo.
 - `uv run pytest -q` and `uv run ruff check .` pass.
 - The Kaggle quota and the session limit are in ADR 0002. Step 6 depends on the session limit.
-- `git status --short` shows nothing tracked as changed.
+- `git status --short` prints nothing at all. Untracked files count, so a stray file from another chat stops the checks too.
 
 Merge to `main` with a merge commit, never a squash. A squash can leave `db5d56f` unreachable, and the seed 42 records need it. Then write the message to a file. Keep only what is true. This template holds what the records say on 2026-11-07, so check each line against what you really saw, above all the E3 and E4 line:
 
@@ -87,7 +89,7 @@ The second hash matters. An annotated tag has its own hash, and the notebooks ne
 - Put each cell below in its own notebook cell, in order. Click **Save Version**, choose **Save & Run All (Commit)**, and close the browser if you like.
 - When a version finishes, open it, go to the **Logs**, and paste into the main chat the last 2 lines of each command, plus the `nvidia-smi` line and the `git log` line. Then download the **Output**.
 
-**Cell 1, the same in every notebook: code at one exact commit.** `sh()` runs a command and stops the notebook if it fails. A plain `!` line stops nothing. This is a full clone, never `--depth 1`, because the test gate asks git about the tag.
+**Cell 1, the same in every notebook: code at one exact commit.** `sh()` runs a command and stops the notebook if it fails. A plain `!` line stops nothing, so we keep `!` only for lines that just print. This is a full clone, never `--depth 1`, because the test gate asks git about the tag.
 
 ```python
 COMMIT = "paste the full 40 character commit here"
@@ -108,18 +110,25 @@ def finished(folder):
 URL = "https://github.com/Noman-Nom/missing-modality-glioma-segmentation.git"
 subprocess.run(["git", "clone", "-q", URL, "/tmp/repo"], check=True)
 subprocess.run(["git", "-C", "/tmp/repo", "checkout", "-q", COMMIT], check=True)
+HEAD = subprocess.run(["git", "-C", "/tmp/repo", "rev-parse", "HEAD"], check=True,
+                      capture_output=True, text=True).stdout.strip()
+assert len(COMMIT) == 40, f"COMMIT must be the full 40 characters: {COMMIT}"
+assert HEAD == COMMIT, f"checked out {HEAD}, not {COMMIT}"
 %cd /tmp/repo
 !git log --oneline -1
-!pip install -q uv
-!uv sync --frozen
+sh("pip install -q uv")
+sh("uv sync --frozen")
 !nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
 DATA_TAR = glob.glob("/kaggle/input/**/brats-gli-train.tar.bin", recursive=True)[0]
-!mkdir -p /tmp/brats
-!tar -xf {DATA_TAR} -C /tmp/brats
-!ls /tmp/brats/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData | wc -l
+sh("mkdir -p /tmp/brats")
+sh(f"tar -xf {DATA_TAR} -C /tmp/brats")
+CASES = len(glob.glob(os.environ["BRATS_TRAIN_DIR"] + "/*"))
+print(CASES)
+if CASES != 1251:
+    raise RuntimeError(f"stopped, expected 1251 cases, found {CASES}")
 ```
 
-The count must be **1251**.
+The cell stops unless the count is **1251**.
 
 ## Step 2: score seed 42 again (one notebook, about 3 h)
 
@@ -136,8 +145,8 @@ R1, R3, R4 = "20261103-023817-f9b3afb6", "20261106-024450-10cfa2cc", "20261106-2
 SOURCE = "/tmp/seed42"
 EVALS = "/kaggle/working/results/0007-confirmation/evals"
 RUN_TAR = glob.glob("/kaggle/input/**/e1-run.tar.bin", recursive=True)[0]
-!mkdir -p {SOURCE}
-!tar -xf {RUN_TAR} -C {SOURCE}
+sh(f"mkdir -p {SOURCE}")
+sh(f"tar -xf {RUN_TAR} -C {SOURCE}")
 for R in (R3, R4):
     shutil.copytree(glob.glob(f"/kaggle/input/**/runs/{R}/", recursive=True)[0], f"{SOURCE}/{R}")
 !ls {SOURCE}
@@ -275,7 +284,7 @@ uv run python experiments/0005-strategies/check_strategy.py results/0007-confirm
 
 `check_strategy.py` reads the two run files only. `check_baseline.py` is not repeated, because it reads the cache, which stayed on Kaggle.
 
-Then all 12 val evals, the study check and the val compare:
+Then all 12 val evals and the study check:
 
 ```bash
 uv run python - <<'EOF' > results/0007-confirmation/runs.txt
@@ -287,11 +296,18 @@ for RUN in $(cat results/0007-confirmation/runs.txt); do
   uv run python experiments/0004-missing-eval/check_eval.py results/0007-confirmation/evals/$(basename $RUN)-val --run $RUN
 done
 uv run python experiments/0007-confirmation/check_confirmation.py --runs $RUNS
+```
+
+Each check should end in `PASS`.
+
+**Commit before the val compare (AC-10).** The compare refuses a dirty tree, and the test gate later refuses a compare that was run on one. So commit `runs.toml` first, and check that `git status --short` prints nothing at all. `results/` and `writing/tables/` are git ignored, so they stay out of it. Then:
+
+```bash
 uv run python experiments/0007-confirmation/compare_seeds.py --runs $RUNS --fold val
 uv run python experiments/0007-confirmation/make_table.py --compare results/0007-confirmation/compare-val
 ```
 
-Each check should end in `PASS`, and the compare should write 18 verdict lines. These are development numbers, and the captions say so. They choose nothing, because the comparison is fixed by the spec.
+The compare should write 18 verdict lines. These are development numbers, and the captions say so. They choose nothing, because the comparison is fixed by the spec. A line can read `split`: the averaged test passed, but the 3 seeds did not all back it, so no claim is made on that line (AC-32).
 
 ## Step 5: the gate, the pin, the preflight, the upload (laptop, no GPU)
 
@@ -317,10 +333,10 @@ Before the preflight:
 
 1. Record the val run in `context/progress-tracker.md`: the run ids, the check results and the real timings.
 2. Commit the tree, with `runs.toml` filled in and `docs/literature/test-gate.md` in it. `results/` is git ignored, so `compare-val` stays on the laptop.
-3. Merge to `main` with a merge commit, push, and run `git rev-parse HEAD`. That full commit is the `COMMIT` of step 6.
-4. Check `git status --short` shows nothing tracked as changed. The test gate refuses a dirty tree.
+3. Merge to `main` with a merge commit, never a squash, push, and run `git rev-parse HEAD`. That full commit is the `COMMIT` of step 6. A squash makes the commit of the val compare unreachable, and the preflight refuses that.
+4. Check `git status --short` prints nothing at all. The test gate refuses a dirty tree, and untracked files count.
 
-After this point, do not change a sealed file. The sealed files are `SEALED_FILES` in `compare_seeds.py`.
+After this point, do not change a sealed file. The sealed files are `SEALED_FILES` in `common/evaluation.py`.
 
 ### The preflight
 
@@ -330,11 +346,13 @@ With the tree committed, and `compare-val` still in `results/` on the laptop, ru
 uv run python experiments/0007-confirmation/compare_seeds.py --runs $RUNS --fold test --preflight
 ```
 
-It should end with `preflight PASS`. It runs the same gate that `evaluate.py` runs for each of the 12 models, and writes nothing. If it refuses, nothing has been read. We recommend bringing the message to the main chat and changing nothing by hand.
+It should end with `preflight PASS`. It runs the same gate that `evaluate.py` runs for each of the 12 models, the seal included (AC-33). On Kaggle, `evaluate.py` adds two rules that can only be checked there: the commit must be the one the preflight passed, and the GPU must be the one of the val evals (AC-34, AC-36).
+
+On a pass it writes one file, `results/0007-confirmation/compare-val/preflight.json`, which holds the commit. Every run first deletes the old file, so the file always means the last preflight passed. There is one exception: once any `*-test` entry sits in `results/0007-confirmation/evals/`, the opening has happened, so the preflight refuses and the file stays as it is. It is the only proof of the commit the opening used, and no new preflight could pass to replace it. A rerun of the val compare moves it away, so the preflight must pass again. If it refuses, no test case has been read. We recommend bringing the message to the main chat and changing nothing by hand.
 
 ### The upload (once)
 
-The test notebook needs the 12 run folders, the 12 val evals and the val compare record (AC-25). They go up as one uncompressed tar with a name Kaggle does not recognise, the same way as the BraTS data. The staging folder sits outside the upload folder, because `kaggle datasets create` uploads what it finds there.
+This comes after the preflight passes, because the upload holds its record. The test notebook needs the 12 run folders, the 12 val evals, the val compare record and the preflight record (AC-25). They go up as one uncompressed tar with a name Kaggle does not recognise, the same way as the BraTS data. The staging folder sits outside the upload folder, because `kaggle datasets create` uploads what it finds there.
 
 ```bash
 STAGE=../kaggle-confirmation-stage
@@ -346,7 +364,7 @@ for RUN in $(cat results/0007-confirmation/runs.txt); do
   cp $RUN/checkpoints/best.pt $STAGE/runs/$R/checkpoints/
   cp -r results/0007-confirmation/evals/$R-val $STAGE/evals/
 done
-cp results/0007-confirmation/compare-val/run.json $STAGE/compare-val/
+cp results/0007-confirmation/compare-val/run.json results/0007-confirmation/compare-val/preflight.json $STAGE/compare-val/
 ls $STAGE/runs | wc -l    # must be 12
 ls $STAGE/evals | wc -l   # must be 12
 tar -cf ../kaggle-confirmation-test/confirmation-test.tar.bin -C $STAGE runs evals compare-val
@@ -359,7 +377,7 @@ Then check the dataset says private, and write that in `data/DATA.md`. That edit
 
 ## Step 6: the one test opening (3 notebook versions)
 
-This is the one opening of the test fold. We recommend reading the whole step first, and checking that steps 1 to 5 all passed. **Batch 1 reads test cases, and that cannot be taken back.** If the gate refuses, nothing has been read. We recommend bringing the message to the main chat, and changing nothing by hand.
+This is the one opening of the test fold. We recommend reading the whole step first, and checking that steps 1 to 5 all passed. **Batch 1 reads test cases, and that cannot be taken back.** Cell 3 caches the test volumes, and cell 4 then runs the gate before the sweep reads a case. If the gate refuses, no prediction or score has been made. We recommend bringing the message to the main chat, and changing nothing by hand.
 
 The 12 sweeps take about 25 h, so they cannot fit one session. Each notebook version runs `SIZE` models: batch 1 runs the first 4, batch 2 the next 4, batch 3 the last 4. Set `SIZE` from the session limit in ADR 0002, because a version that hits the limit may lose its **Output**.
 
@@ -369,7 +387,7 @@ Cell 1 is the cell of the notebook settings, with the `COMMIT` of step 5.
 
 **Cell 2: the study files**
 
-`/kaggle/input` is read only, and the sweep writes beside the val eval, so the files go into `/kaggle/working/confirmation/`. The gate reads the val compare from the repo folder, so it is copied there. `results/` is git ignored, so the tree stays clean.
+`/kaggle/input` is read only, and the sweep writes beside the val eval, so the files go into `/kaggle/working/confirmation/`. The gate reads the val compare record and the preflight record from the repo folder, so both are copied there. `results/` is git ignored, so the tree stays clean.
 
 ```python
 BATCH, SIZE = 1, 4
@@ -377,12 +395,12 @@ WORK = "/kaggle/working/confirmation"
 OLD = glob.glob("/kaggle/input/**/confirmation/runs", recursive=True)
 if not OLD:
     TEST_TAR = glob.glob("/kaggle/input/**/confirmation-test.tar.bin", recursive=True)[0]
-    !mkdir -p {WORK}
-    !tar -xf {TEST_TAR} -C {WORK}
+    sh(f"mkdir -p {WORK}")
+    sh(f"tar -xf {TEST_TAR} -C {WORK}")
 else:
     shutil.copytree(os.path.dirname(OLD[0]), WORK)
-!mkdir -p results/0007-confirmation/compare-val
-!cp {WORK}/compare-val/run.json results/0007-confirmation/compare-val/
+sh("mkdir -p results/0007-confirmation/compare-val")
+sh(f"cp {WORK}/compare-val/run.json {WORK}/compare-val/preflight.json results/0007-confirmation/compare-val/")
 IDS = list(json.load(open(f"{WORK}/compare-val/run.json"))["run_ids"].values())
 print(len(IDS), len(os.listdir(f"{WORK}/runs")))
 ```
@@ -418,7 +436,11 @@ A resume stops with exit 2 if the commit, the config, `protocol_hash`, the sourc
 
 ## Step 7: after the opening (laptop, no GPU)
 
-From the last version's **Output**, copy the 12 `confirmation/evals/<run id>-test/` folders to `results/0007-confirmation/evals/`, keeping every file. Then the RQ2 comparison:
+From the last version's **Output**, copy the 12 `confirmation/evals/<run id>-test/` folders to `results/0007-confirmation/evals/`, keeping every file.
+
+Then copy `confirmation/compare-val/preflight.json` from the same **Output** over `results/0007-confirmation/compare-val/preflight.json`, with no comparison. That copy is the record the Kaggle gate read, so it wins. The laptop cannot see the test folders while they sit on Kaggle, so a preflight run there during step 6 could have changed its copy (AC-34).
+
+Then the RQ2 comparison:
 
 ```bash
 uv run python experiments/0007-confirmation/compare_seeds.py --runs $RUNS --fold test
@@ -438,7 +460,9 @@ done
 uv run python experiments/0007-confirmation/rq1_seeds.py --eval $E/<id 42>-test --eval $E/<id 43>-test --eval $E/<id 44>-test
 ```
 
-All 3 seeds go in the thesis. An H1 claim is made only on a line that says `agree`. On a line that says `split`, the thesis reports the split and makes no claim.
+All 3 seeds go in the thesis. An H1 claim is made only on a line that says `agree`. On a line that says `split`, the thesis reports the split and makes no claim. `rq1_seeds.py` reads `runs.toml`, so an eval of another arm is refused.
+
+The same word on the RQ2 lines means the same thing (AC-32). `split` is never written as no effect, no cost or a weak effect.
 
 Then record the opening in `context/progress-tracker.md`: the date, the commit and the 12 eval ids (AC-22).
 

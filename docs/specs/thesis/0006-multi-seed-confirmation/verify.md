@@ -78,5 +78,47 @@ Toy folders and a toy git repo, until the human runs. No test case exists in any
 - [ ] 4 input channels: `n_params` of each E3b run against the E1 of its seed. The real values are 12,870,506 for E1 and E3 and 12,877,418 for E4, so the rule tells them apart → AC-2
 - [ ] Session limit: the batch `SIZE` in step 6 comes from ADR 0002, which does not hold it yet → AC-25
 
+## Milestone 5, review fixes (added 2026-11-07)
+Toy folders and a toy git repo, until the human runs. No test case exists in any of these steps.
+- [ ] `uv run pytest -q` → all pass → AC-32 to AC-37
+- [ ] `uv run ruff check .` → clean → AC-23
+- [ ] Toy with 3 identical seeds → same words and numbers as `0005-strategies/compare.py`, once `seeds_agree` is removed → AC-24, AC-32
+- [ ] Toy H2 with `p_holm` under alpha and seeds at +, +, minus → `split`, `seeds_agree=2/3` → AC-32
+- [ ] Toy H3 with CI inside the margin and seeds at +0.002, minus 0.001, +0.001 → `equivalent`, `seeds_agree=2/3`, `seeds_within=3/3` → AC-32
+- [ ] Same toy with one seed at +0.020 → `split` → AC-32
+- [ ] Toy H3 `inconclusive` with seeds split → stays `inconclusive` → AC-32
+- [ ] Toy H4 passing, with one seed at minus 0.020 on `incomplete` → `split`, `seeds_not_worse=2/3` → AC-32
+- [ ] Toy H2 `not supported` with a negative averaged `mean_diff` and all seeds negative → `seeds_agree=0/3`, and H3 on the same seeds → `seeds_agree=3/3` → AC-32
+- [ ] `make_table.py` on a compare with a `split` on H2, H3 and H4 → builds, the word shows, the dagger shows on the H2 cell → AC-29
+- [ ] Toy repo: a commit moving a sealed file, then `evaluate.py --fold test --open-test` → refused, prints `test gate, nothing read`, no `*-test` folder → AC-33
+- [ ] Preflight passed, then a preflight refused → no `preflight.json` left. Preflight passed → the file holds HEAD → AC-34
+- [ ] Preflight passed, a `*-test` folder on disk, then `--preflight` → exit 2, one line per entry reads `<entry> exists: the test was opened already, so preflight.json stays as it is`, `preflight.json` byte for byte the same, `--fold test` still passes → AC-34
+- [ ] A stray `*-test` entry outside the 12 run ids, then `--preflight` → the same refusal, the record not rewritten → AC-34
+- [ ] A bad manifest with a `*-test` entry on disk, then `--preflight` → the refusal still prints, the record unchanged → AC-34
+- [ ] `--fold val --preflight` with a passed record → exit 2, the record unchanged → AC-34
+- [ ] No `*-test` entry, a refused `--fold test --preflight` → the record is deleted → AC-34
+- [ ] Grep `compare_seeds.py` → `*-test` is globbed in one place, `opened_folders`, used by `main`, `guards` and `val_side_problems`, and `preflight_problems` holds no per run id check → AC-34
+- [ ] `git diff` of this fix → `compare_hash()` moves, `protocol_hash()` does not, and `EXPECTED_PROTOCOL_HASH` is unchanged → AC-34
+- [ ] Read `KAGGLE.md` step 7 → `confirmation/compare-val/preflight.json` is copied from the last **Output** over the laptop copy, after the evals and before `--fold test`. Read its preflight paragraph → the exception is there → AC-34
+- [ ] Val compare commit not an ancestor of HEAD → preflight refused. A `*-test` folder on disk → `--fold val` refused → AC-34
+- [ ] `preflight.json` naming another commit, or missing → `evaluate.py` refused → AC-34
+- [ ] A rerun of the val compare → the old `preflight.json` is gone from `compare-val/` → AC-34
+- [ ] In a copy of `compare-val/run.json`, set `fold`, `prereg_tag`, `git_dirty` and `eval_sha256` wrong in turn, and edit one byte of a val `metrics.csv`, then delete it → each refused by the preflight and by the gate, as a listed error → AC-35
+- [ ] `compare_seeds.py --fold val` with one untracked file → exit 2, and the message says untracked files count. `--fold test` with one untracked file → passes, and records `git_dirty` true → AC-10
+- [ ] `git_info()` patched to give `(None, None)` → `--fold val` refused → AC-10
+- [ ] `cs.SEALED_FILES` holds `common/runlog.py`, `common/cache.py`, `common/data.py` and `rq1_seeds.py`, and editing any of them changes `compare_hash()` → AC-28
+- [ ] `gpu` in a toy val eval set to another name → `evaluate.py --fold test --open-test` refused, and a finished test eval fails `check_rules` → AC-36
+- [ ] `git diff` of the fixes touches no `model.py`, `strategies.py`, `metrics.py`, `stats.py`, `missing.py`, `predict` or `sweep` → AC-37
+- [ ] `tests/test_common_strategies.py` pin test passes with the new hash, and `EXPECTED_PROTOCOL_HASH` equals `SEALED_HASH` → AC-37
+- [ ] Read `0007-confirmation/KAGGLE.md` step 4 to step 6 → commit before the val compare, `git status --short` prints nothing at all, both `compare-val` files in the upload and in cell 2, the same gate line corrected → AC-20, AC-25, AC-34
+- [ ] Real opening, human only: `compare_seeds.py --fold test` → every eval commit equals `preflight.json` → AC-28, AC-34
+
+## Value sourcing, milestone 5
+- [ ] Seed values: per line, the counts match a hand count from `per_seed.csv`, at `incomplete` for H2, `complete` for H3, both for H4 → AC-32
+- [ ] Margin in `seeds_within`: change `EQUIV_MARGIN` in a copy → the counts follow → AC-32
+- [ ] Preflighted commit: from `git_info()`, never typed in, read from `COMPARE_VAL`, whatever `--out` says → AC-34
+- [ ] Expected GPU: from the val eval `run.json` of this run → AC-36
+- [ ] Eval hashes: `sha256sum` of each val `metrics.csv` equals `eval_sha256` in `run.json` → AC-35
+
 ## Not covered yet
 AC-8 needs the human tag. AC-22 needs the real opening. AC-1, AC-5 and AC-6 are proven on toys only until the 9 runs exist.

@@ -13,19 +13,22 @@ and every test runs on those means, so n is the number of subjects (AC-11). Writ
 lines: 9 H2, 6 H3, 3 H4) and run.json, last. All numbers come from metrics.csv of the evals, so it
 uses no GPU. A finished folder is refused unless --rerun-reason is given (AC-17).
 
---fold test also refuses if a sealed file moved since the val compare or the tag, or if the commit
-of an eval has no passing literature gate (AC-28). --preflight runs every guard that needs no test
-metric, and writes nothing (AC-20). It reads no test case, so it goes before the opening.
+--fold val needs a committed tree, with no untracked file, and no test eval on disk (AC-10, AC-34).
+--fold test also refuses if a sealed file moved since the val compare or the tag, if the commit of
+an eval has no passing literature gate, or if that commit is not the one the preflight passed
+(AC-28). --preflight runs every guard that needs no test metric (AC-20), and reads no test case, so
+it goes before the opening. It writes one file, compare-val/preflight.json, and only on a pass: it
+deletes any older one first, so the file always means the last preflight passed. Once a *-test
+entry exists in --evals the opening has happened, so it refuses and leaves the file as it is, the
+one proof of the commit the opening used (AC-34).
 
 This repeats some of 0005-strategies/compare.py on purpose: experiments never import each other,
 and that file stays unchanged (AC-21). A test proves both give the same H2 lines (AC-24).
 """
 import argparse
 import csv
-import hashlib
 import json
 import shutil
-import subprocess
 import sys
 import tomllib
 from datetime import UTC, datetime
@@ -35,16 +38,20 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.cache import sha256_file
 from common.data import REGIONS
 from common.evaluation import (
-    LITERATURE_GATE,
+    PREFLIGHT,
     PREREG_TAG,
-    PROTOCOL_FILES,
     check_rules,
     check_test_gate,
+    compare_hash,
     descends_from_tag,
-    gate_problems,
+    is_ancestor,
     protocol_hash,
+    seal_problems,
+    val_file_problems,
+    val_record_problems,
 )
 from common.missing import PATTERNS
 from common.runlog import config_hash, git_info, load_config, load_run
@@ -53,11 +60,7 @@ from common.strategies import strategy_name
 
 REPO = Path(__file__).resolve().parents[2]
 # protocol_hash() at the tag commit. Repinned there, beside SEALED_HASH; a test keeps them equal.
-EXPECTED_PROTOCOL_HASH = "fa903bff0f4a7dfd20863c633e35b6350e8feb14407f2d33a4b16d089a0ad9e2"
-# The scored files after protocol_hash(): a compare is refused if one moved since the val compare
-SEALED_FILES = (*PROTOCOL_FILES, "experiments/common/strategies.py", "experiments/common/model.py",
-                "experiments/0004-missing-eval/evaluate.py",
-                "experiments/0007-confirmation/compare_seeds.py")
+EXPECTED_PROTOCOL_HASH = "48925eb52e0cbc05ee97ec1715484ad3cff7fc9573d8f3a68d6bf64abfe6745c"
 EVAL_CONFIG = Path(__file__).resolve().parents[1] / "0004-missing-eval" / "config.toml"
 EQUIV_MARGIN = 0.015  # in Dice, borrowed from Oechsner 2026 (AC-14), a sealed value
 ARMS = ("e1", "e3", "e4", "e3b")
@@ -94,9 +97,9 @@ PER_SEED_COLUMNS = ["seed", "metric", "region", "level", "comparison", "mean_dif
 VOLUME_COLUMNS = ["arm", "seed", "pattern_id", "pattern_name", "n", "mean_diff_ml", "loa_low_ml",
                   "loa_high_ml"]
 RUN_JSON_KEYS = ("compare_id", "status", "fold", "n_cases", "run_ids", "eval_commits",
-                 "versions_equal", "n_resumes", "seeds", "alpha", "equiv_margin", "compare_hash",
-                 "protocol_hash", "splits_sha256", "prereg_tag", "git_commit", "git_dirty",
-                 "rerun_reason", "superseded")
+                 "eval_sha256", "versions_equal", "n_resumes", "seeds", "alpha", "equiv_margin",
+                 "compare_hash", "protocol_hash", "splits_sha256", "prereg_tag", "git_commit",
+                 "git_dirty", "rerun_reason", "superseded")
 P_COLUMNS = {"p_raw", "p_holm"}
 
 
@@ -393,15 +396,39 @@ def cost_label(ci_low, ci_high, margin=EQUIV_MARGIN):
     return "inconclusive"
 
 
+def seed_means(per_seed, region, name, level):
+    """The unrounded Dice mean_diff of each seed, from the rows per_seed.csv is written from."""
+    return [r["mean_diff"] for r in per_seed
+            if (r["metric"], r["region"], r["level"], r["comparison"])
+            == ("dice", region, level, name)]
+
+
 def seeds_agree(per_seed, region, name, mean_diff):
     """How many seeds have a Dice mean_diff at pattern 1 of the same sign as the averaged one."""
-    return sum(np.sign(r["mean_diff"]) == np.sign(mean_diff) for r in per_seed
-               if (r["metric"], r["region"], r["level"], r["comparison"])
-               == ("dice", region, COMPLETE, name))
+    return sum(np.sign(v) == np.sign(mean_diff)
+               for v in seed_means(per_seed, region, name, COMPLETE))
+
+
+def seeds_within(per_seed, region, name):
+    """How many seeds have a Dice mean_diff at pattern 1 strictly inside the margin (AC-14)."""
+    return sum(-EQUIV_MARGIN < v < EQUIV_MARGIN
+               for v in seed_means(per_seed, region, name, COMPLETE))
+
+
+def seeds_above(per_seed, region, name, level, floor):
+    """How many seeds have a Dice mean_diff strictly above floor at this level (AC-32)."""
+    return sum(v > floor for v in seed_means(per_seed, region, name, level))
+
+
+def seed_word(word, *counts):
+    """AC-32: a claim the averaged test gave stands only if every count covers all the seeds. This
+    adds a condition and removes none, so it runs only on a word that is a claim."""
+    return "split" if any(c < len(SEEDS) for c in counts) else word
 
 
 def h3_verdict(summary, per_seed):
-    """The six H3 lines (AC-14, AC-18). The p value is reported, and never changes the label."""
+    """The six H3 lines (AC-14, AC-18, AC-32). The p value is reported, and never changes the
+    label."""
     rows = {(r["region"], r["comparison"]): r for r in summary if r["family"] == "H3"}
     lines = []
     for h, (name, _, _) in H3_LINES.items():
@@ -409,39 +436,55 @@ def h3_verdict(summary, per_seed):
             r = rows[g, name]
             low, high = r["ci_low"], r["ci_high"]
             agree = seeds_agree(per_seed, g, name, r["mean_diff"])
-            lines.append(f"{h} {g}: {cost_label(low, high)} ({name}, "
+            within = seeds_within(per_seed, g, name)
+            word = cost_label(low, high)
+            if word == "equivalent":
+                word = seed_word(word, within)
+            elif word in ("cost", "gain"):
+                word = seed_word(word, agree)
+            lines.append(f"{h} {g}: {word} ({name}, "
                          f"mean_diff={r['mean_diff']:+.6f}, median_diff={r['median_diff']:+.6f}, "
                          f"ci=[{low:+.6f}, {high:+.6f}], "
                          f"min_margin={max(abs(low), abs(high)):.6f}, "
-                         f"seeds_agree={agree}/{len(SEEDS)}, p_raw={r['p_raw']:.6g})")
+                         f"seeds_agree={agree}/{len(SEEDS)}, seeds_within={within}/{len(SEEDS)}, "
+                         f"p_raw={r['p_raw']:.6g})")
     return lines
 
 
-def h4_verdict(summary, alpha):
-    """The three H4 lines. Both parts must hold, so no Holm correction is used (AC-15)."""
+def h4_verdict(summary, alpha, per_seed):
+    """The three H4 lines. Both parts must hold, so no Holm correction is used (AC-15), and then
+    all the seeds must back both parts (AC-32)."""
     rows = {(r["region"], r["level"]): r for r in summary if r["family"] == "H4"}
     lines = []
     for g in REGIONS:
         c, primary = rows[g, COMPLETE], rows[g, PRIMARY]
+        agree = seeds_above(per_seed, g, EXPOSURE[0], COMPLETE, 0)
+        not_worse = seeds_above(per_seed, g, EXPOSURE[0], PRIMARY, -EQUIV_MARGIN)
         gain = c["mean_diff"] > 0 and c["median_diff"] > 0 and c["p_raw"] < alpha
-        word = "supported" if gain and primary["ci_low"] > -EQUIV_MARGIN else "not supported"
+        word = (seed_word("supported", agree, not_worse)
+                if gain and primary["ci_low"] > -EQUIV_MARGIN else "not supported")
         lines.append(f"H4 {g}: {word} ({EXPOSURE[0]}, complete_mean_diff={c['mean_diff']:+.6f}, "
                      f"complete_median_diff={c['median_diff']:+.6f}, "
-                     f"complete_p={c['p_raw']:.6g}, primary_ci90_low={primary['ci_low']:+.6f})")
+                     f"complete_p={c['p_raw']:.6g}, primary_ci90_low={primary['ci_low']:+.6f}, "
+                     f"seeds_agree={agree}/{len(SEEDS)}, "
+                     f"seeds_not_worse={not_worse}/{len(SEEDS)})")
     return lines
 
 
-def h2_verdict(summary, alpha):
-    """The nine H2 lines, on unrounded numbers, with the rule of spec 0005 (AC-13)."""
+def h2_verdict(summary, alpha, per_seed):
+    """The nine H2 lines, on unrounded numbers, with the rule of spec 0005 (AC-13), then the seed
+    rule (AC-32)."""
     primary = {(r["region"], r["comparison"]): r for r in summary
                if r["family"] == "H2" and r["metric"] == "dice" and r["level"] == PRIMARY}
     lines = []
     for h, name in H2_LINES.items():
         for g in REGIONS:
             r = primary[g, name]
-            word = "supported" if r["mean_diff"] > 0 and r["p_holm"] < alpha else "not supported"
+            agree = seeds_above(per_seed, g, name, PRIMARY, 0)
+            word = (seed_word("supported", agree) if r["mean_diff"] > 0 and r["p_holm"] < alpha
+                    else "not supported")
             lines.append(f"{h} {g}: {word} ({name}, mean_diff={r['mean_diff']:+.6f}, "
-                         f"p_holm={r['p_holm']:.6g})")
+                         f"p_holm={r['p_holm']:.6g}, seeds_agree={agree}/{len(SEEDS)})")
     return lines
 
 
@@ -468,14 +511,6 @@ def write_csv(path, columns, rows):
         w.writerows({k: cell(k, v) for k, v in r.items()} for r in rows)
 
 
-def compare_hash():
-    """sha256 over the bytes of SEALED_FILES, in that order (AC-28)."""
-    h = hashlib.sha256()
-    for name in SEALED_FILES:
-        h.update((Path(__file__).resolve().parents[2] / name).read_bytes())
-    return h.hexdigest()
-
-
 def folder_problems(folder, rerun_reason):
     """AC-17: only a finished folder may be replaced, and only with a reason."""
     if not folder.exists():
@@ -486,44 +521,62 @@ def folder_problems(folder, rerun_reason):
     return [] if rerun_reason else [f"{folder} is finished; give --rerun-reason to replace it"]
 
 
-def seal_problems(commit):
-    """AC-28 for one commit: no sealed file differs from the tag, and its literature gate passes.
-    Asks git about that commit, so an edit in the tree or a rewrite after the opening changes
-    nothing here."""
-    diff = subprocess.run(["git", "-C", str(REPO), "diff", "--quiet", f"refs/tags/{PREREG_TAG}",
-                           str(commit), "--", *SEALED_FILES], capture_output=True, check=False)
-    errors = [f"commit {commit}: a sealed file differs from {PREREG_TAG}"] if diff.returncode else []
-    gate = subprocess.run(["git", "-C", str(REPO), "show", f"{commit}:{LITERATURE_GATE}"],
-                          capture_output=True, encoding="utf-8", check=False)
-    if gate.returncode:
-        return errors + [f"commit {commit}: it holds no {LITERATURE_GATE}"]
-    return errors + [f"commit {commit}: {e}" for e in gate_problems(gate.stdout)]
+def opened_folders(evals):
+    """Every *-test entry in the evals folder, finished or not, file or folder. Any one of them
+    means the opening has happened (AC-34)."""
+    return sorted(Path(evals).glob("*-test"))
+
+
+def val_side_problems(evals):
+    """AC-10 and AC-34, for --fold val only. A clean tree lets the record say git_dirty false, and
+    a test eval on disk means the opening has happened, so the record must not move."""
+    dirty = git_info()[1]
+    errors = [] if dirty is False else [
+        f"git_dirty is {dirty!r}, must be False: commit first, an untracked file counts too"]
+    return errors + [f"{d} exists: the test was opened, so the val compare stays as it is"
+                     for d in opened_folders(evals)]
 
 
 def val_compare_problems(out, run_recs, eval_recs):
-    """AC-28 against compare-val/run.json. eval_recs are the test evals, or in the preflight the
-    val evals, which must still be the ones the val compare read."""
+    """AC-28 and AC-35 against compare-val/run.json. eval_recs are the test evals, or in the
+    preflight the val evals, which must still be the ones the val compare read."""
     folder = out / "compare-val"
     if not (folder / "run.json").is_file():
         return [f"{folder} missing: run compare_seeds.py --fold val first"]
     rec = load_run(folder)
-    errors = []
-    if rec.get("status") != "ok":
-        errors.append(f"val compare: status is {rec.get('status')!r}, not 'ok'")
+    errors = val_record_problems(rec)
     if rec.get("run_ids") != {slot_key(s): r["run_id"] for s, r in run_recs.items()}:
         errors.append("val compare: names other runs")
-    if rec.get("compare_hash") != compare_hash():
-        errors.append("compare_hash differs from the val compare's: a sealed file moved")
     return errors + [f"{label(*slot)} eval: {k} differs from the val compare's"
                      for slot, ev in eval_recs.items() for k in ("protocol_hash", "splits_sha256")
                      if ev.get(k) != rec.get(k)]
 
 
+def val_files_problems(a, run_recs):
+    """AC-35 on --fold test: all 12 val metrics.csv are still the files the val compare read."""
+    folder = a.out / "compare-val"
+    if not (folder / "run.json").is_file():
+        return []  # val_compare_problems has said so
+    hashes = load_run(folder).get("eval_sha256", {})
+    return [e for slot, r in run_recs.items() for e in val_file_problems(
+        a.evals / f"{r['run_id']}-val" / "metrics.csv", hashes.get(slot_key(slot)))]
+
+
+def preflight_record_problems(out, eval_recs):
+    """AC-28: every test eval comes from the one commit that passed the preflight."""
+    path = out / "compare-val" / PREFLIGHT
+    if not path.is_file():
+        return [f"{path} missing: the preflight did not pass"]
+    commit = json.loads(path.read_text()).get("git_commit")
+    return [f"{label(*slot)} eval: commit {ev.get('git_commit')} is not the preflight's, {commit}"
+            for slot, ev in eval_recs.items() if ev.get("git_commit") != commit]
+
+
 def preflight_problems(a, run_dirs, run_recs):
     """Every guard of the test path that needs no test metric (AC-20): the 12 val evals, the gate
-    of evaluate.py for each model, the val compare, and the seal of this commit. Reads no test
-    case. A test eval on disk means the opening has happened, and no amendment exists after it
-    (AC-31)."""
+    of evaluate.py for each model, which holds the seal (AC-33), and the val compare, whose commit
+    must be reachable from here, or a squash merge would only show on Kaggle (AC-34). Reads no test
+    case."""
     commit, dirty = git_info()
     val_dirs = {s: a.evals / f"{r['run_id']}-val" for s, r in run_recs.items()}
     errors, val_recs, _ = eval_problems(val_dirs, run_dirs, "val")
@@ -536,10 +589,12 @@ def preflight_problems(a, run_dirs, run_recs):
             "test", True, False, rec, (commit, dirty), val_dirs[slot], run_dirs[slot], protocol,
             config)]
     errors += val_compare_problems(a.out, run_recs, val_recs)
-    errors += seal_problems(commit)
-    return errors + [f"{label(*slot)}: {a.evals / (r['run_id'] + '-test')} exists: the test was "
-                     "opened already" for slot, r in run_recs.items()
-                     if (a.evals / f"{r['run_id']}-test").exists()]
+    if (a.out / "compare-val" / "run.json").is_file():
+        val_commit = load_run(a.out / "compare-val").get("git_commit")
+        if not is_ancestor(val_commit, commit, REPO):
+            errors.append(f"val compare: commit {val_commit} is not an ancestor of {commit}: "
+                          "merge with a merge commit, never a squash")
+    return errors
 
 
 def guards(a):
@@ -548,6 +603,11 @@ def guards(a):
     if a.preflight and a.fold != "test":
         return ["--preflight is only for --fold test"], {}, {}, {}, {}
     errors, run_dirs = manifest_problems(a.runs, a.root)
+    if a.preflight:  # before every early return, so a bad manifest still prints it (AC-34)
+        errors += [f"{d} exists: the test was opened already, so {PREFLIGHT} stays as it is"
+                   for d in opened_folders(a.evals)]
+    if a.fold == "val":
+        errors += val_side_problems(a.evals)
     if len(run_dirs) != len(slots()):
         return errors, {}, {}, {}, {}
     more, run_recs = run_problems(run_dirs)
@@ -561,6 +621,8 @@ def guards(a):
     errors += more
     if a.fold == "test":
         errors += val_compare_problems(a.out, run_recs, eval_recs)
+        errors += val_files_problems(a, run_recs)
+        errors += preflight_record_problems(a.out, eval_recs)
         for commit in sorted({str(rec.get("git_commit")) for rec in eval_recs.values()}):
             errors += seal_problems(commit)
     errors += folder_problems(a.out / f"compare-{a.fold}", a.rerun_reason)
@@ -571,7 +633,7 @@ def slot_key(slot):
     return f"{slot[0]}_seed{slot[1]}"
 
 
-def run_record(a, run_recs, eval_recs, cfg, superseded):
+def run_record(a, run_recs, eval_dirs, eval_recs, cfg, superseded):
     """run.json of a finished compare, in the order of Output schemas, plus the two rerun fields
     of AC-17, so a replaced folder keeps its reason."""
     versions = [rec.get("versions") for rec in eval_recs.values()]
@@ -582,6 +644,7 @@ def run_record(a, run_recs, eval_recs, cfg, superseded):
         "n_cases": first["n_cases"],
         "run_ids": {slot_key(s): rec["run_id"] for s, rec in run_recs.items()},
         "eval_commits": {slot_key(s): rec["git_commit"] for s, rec in eval_recs.items()},
+        "eval_sha256": {slot_key(s): sha256_file(d / "metrics.csv") for s, d in eval_dirs.items()},
         "versions_equal": all(v == versions[0] for v in versions),
         "n_resumes": {slot_key(s): len(rec["resumes"]) for s, rec in run_recs.items()},
         "seeds": list(SEEDS), "alpha": cfg["alpha"], "equiv_margin": EQUIV_MARGIN,
@@ -602,13 +665,19 @@ def main(argv=None):
     ap.add_argument("--rerun-reason")
     ap.add_argument("--preflight", action="store_true", help="the checks before the test opening")
     a = ap.parse_args(argv)
+    # first, so a refusal leaves no record, unless the opening has made it the only proof (AC-34)
+    if a.preflight and a.fold == "test" and not opened_folders(a.evals):
+        (a.out / "compare-val" / PREFLIGHT).unlink(missing_ok=True)
     errors, run_recs, eval_dirs, eval_recs, frames = guards(a)
     if errors:
         for e in errors:
             print(f"ERROR: {e}")
         return 2
     if a.preflight:
-        print("preflight PASS: nothing read from the test fold, nothing written")
+        record = {"status": "ok", "git_commit": git_info()[0],
+                  "date": datetime.now(UTC).isoformat(timespec="seconds")}
+        (a.out / "compare-val" / PREFLIGHT).write_text(json.dumps(record, indent=2))
+        print(f"preflight PASS: nothing read from the test fold, {PREFLIGHT} written")
         return 0
 
     first = ARMS[0], SEEDS[0]
@@ -627,8 +696,8 @@ def main(argv=None):
         for e in bad:
             print(f"ERROR: {e}")
         return 2
-    lines = [*h2_verdict(summary, cfg["alpha"]), *h3_verdict(summary, per_seed),
-             *h4_verdict(summary, cfg["alpha"])]
+    lines = [*h2_verdict(summary, cfg["alpha"], per_seed), *h3_verdict(summary, per_seed),
+             *h4_verdict(summary, cfg["alpha"], per_seed)]
 
     # built beside the final folder, so a crash leaves no half folder and keeps a finished one
     final = a.out / f"compare-{a.fold}"
@@ -645,7 +714,7 @@ def main(argv=None):
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         superseded = f"{final.name}.superseded-{stamp}"
         final.rename(final.with_name(superseded))
-    record = run_record(a, run_recs, eval_recs, cfg, superseded)
+    record = run_record(a, run_recs, eval_dirs, eval_recs, cfg, superseded)
     (partial / "run.json").write_text(json.dumps(record, indent=2))
     partial.rename(final)
     print("\n".join(lines))

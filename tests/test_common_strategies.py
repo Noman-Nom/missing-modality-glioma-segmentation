@@ -35,7 +35,7 @@ REPO = Path(__file__).resolve().parents[1]
 E1_CONFIG = REPO / "experiments" / "0003-baseline" / "config.toml"
 EXP = REPO / "experiments" / "0005-strategies"
 TINY = {"channels": [4, 8], "strides": [2], "num_res_units": 1}
-SEALED_HASH = "fa903bff0f4a7dfd20863c633e35b6350e8feb14407f2d33a4b16d089a0ad9e2"
+SEALED_HASH = "48925eb52e0cbc05ee97ec1715484ad3cff7fc9573d8f3a68d6bf64abfe6745c"
 
 
 def batch(b=3, size=4):

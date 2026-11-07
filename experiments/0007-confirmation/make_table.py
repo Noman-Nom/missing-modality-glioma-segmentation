@@ -3,7 +3,7 @@
     uv run python experiments/0007-confirmation/make_table.py --compare <compare dir>
 Writes 0007-confirmation-<fold>-summary.tex, -cost.tex, -exposure.tex, -patterns-dice.tex,
 -patterns-hd95.tex, -seeds.tex and -volume.tex. No number is typed by hand, and no label is
-decided here: H3 and H4 words come from verdict.txt. Reads only the compare folder. Exit 1, leaving
+decided here: H2, H3 and H4 words come from verdict.txt. Reads only the compare folder. Exit 1, leaving
 older tables untouched, unless run.json is there with status ok, and every other file is there
 with its row count. -seeds.tex and -volume.tex run over a page, so they use the longtable package.
 """
@@ -37,13 +37,20 @@ ARMS = ("E1", "E3", "E4", "E3b")
 SEEDS = 3
 FINE = 4  # places for the cost and exposure lines, because the margin is 0.015
 STAR = "$^{*}$"
+DAGGER = r"$^{\dagger}$"
 SUMMARY_ROWS = 87  # 72 H2, 6 H3, 6 H4, 3 descriptive
-COST_HEAD = (r"Comparison & Region & Mean & Median & 95\% CI & Min margin & Seeds agree & $p$ & "
-             r"Label \\")
+COST_HEAD = (r"Comparison & Region & Mean & Median & 95\% CI & Min margin & Seeds agree & "
+             r"Seeds within & $p$ & Label \\")
 EXPOSURE_HEAD = (r"Region & Mean, pattern 1 & Median, pattern 1 & $p$ & 90\% lower, incomplete & "
-                 r"H4 & E3b-E1 & 95\% CI \\")
-H3_LINE = re.compile(r"^H3[ab] (\w+): (\w+) \((\S+?),.* seeds_agree=(\d+/\d+),")
-H4_LINE = re.compile(r"^H4 (\w+): (supported|not supported) \(")
+                 r"Seeds agree & Seeds not worse & H4 & E3b-E1 & 95\% CI \\")
+SPLIT_NOTE = (" A line reads split when the averaged test passed but the seeds did not all back "
+              "it, so no claim is made.")
+H2_LINE = re.compile(r"^H2[abc] (\w+): (supported|not supported|split) \((\S+?),.* "
+                     r"seeds_agree=(\d+/\d+)\)$")
+H3_LINE = re.compile(r"^H3[ab] (\w+): (\w+) \((\S+?),.* seeds_agree=(\d+/\d+), "
+                     r"seeds_within=(\d+/\d+),")
+H4_LINE = re.compile(r"^H4 (\w+): (supported|not supported|split) \(.* seeds_agree=(\d+/\d+), "
+                     r"seeds_not_worse=(\d+/\d+)\)$")
 
 
 def finished_run(folder):
@@ -86,18 +93,21 @@ def read_compare(folder):
 
 
 def read_verdict(folder):
-    """{(comparison, region): (label, seeds_agree)} of H3 and {region: word} of H4, as written by
-    compare_seeds.py, so this file makes no decision."""
+    """As written by compare_seeds.py, so this file makes no decision: {(comparison, region):
+    (word, seeds_agree)} of H2, {(comparison, region): (label, seeds_agree, seeds_within)} of H3,
+    and {region: (word, seeds_agree, seeds_not_worse)} of H4."""
     path = Path(folder) / "verdict.txt"
     if not path.is_file():
         raise SystemExit(f"ERROR: {path} missing")
     lines = path.read_text().splitlines()
-    h3 = {(m[3], m[1]): (m[2], m[4]) for m in map(H3_LINE.match, lines) if m}
-    h4 = {m[1]: m[2] for m in map(H4_LINE.match, lines) if m}
-    if len(h3) != len(H3_COMPARISONS) * len(REGIONS) or len(h4) != len(REGIONS):
-        raise SystemExit(f"ERROR: {len(h3)} H3 and {len(h4)} H4 lines in verdict.txt, expected "
-                         f"{len(H3_COMPARISONS) * len(REGIONS)} and {len(REGIONS)}")
-    return h3, h4
+    h2 = {(m[3], m[1]): (m[2], m[4]) for m in map(H2_LINE.match, lines) if m}
+    h3 = {(m[3], m[1]): (m[2], m[4], m[5]) for m in map(H3_LINE.match, lines) if m}
+    h4 = {m[1]: (m[2], m[3], m[4]) for m in map(H4_LINE.match, lines) if m}
+    want = (len(H2_COMPARISONS) * len(REGIONS), len(H3_COMPARISONS) * len(REGIONS), len(REGIONS))
+    if (len(h2), len(h3), len(h4)) != want:
+        raise SystemExit(f"ERROR: {len(h2)} H2, {len(h3)} H3 and {len(h4)} H4 lines in verdict.txt, "
+                         f"expected {want[0]}, {want[1]} and {want[2]}")
+    return h2, h3, h4
 
 
 def star(row, alpha):
@@ -175,7 +185,12 @@ def group_head(groups, span, first, sub):
     return [rf"{blank} & {spanning} \\", " & ".join([*first, *sub * len(groups)]) + r" \\"]
 
 
-def summary_table(summary, rec):
+def dagger(h2, metric, region, comparison):
+    """A dagger on a Dice cell whose H2 line reads split (AC-32). HD95 has no H2 line."""
+    return DAGGER if metric == "dice" and h2[comparison, region][0] == "split" else ""
+
+
+def summary_table(summary, h2, rec):
     """The H2 primary score, on the seed averaged values: mean_diff with its star and CI."""
     rows = []
     for m in METRICS:
@@ -183,14 +198,16 @@ def summary_table(summary, rec):
             cells = []
             for c in H2_COMPARISONS:
                 row = summary["H2", m, g, "incomplete", c]
-                cells += [f"{float(row['mean_diff']):+.{DECIMALS[m]}f}{star(row, rec['alpha'])}",
+                diff = f"{float(row['mean_diff']):+.{DECIMALS[m]}f}"
+                cells += [f"{diff}{star(row, rec['alpha'])}{dagger(h2, m, g, c)}",
                           interval(row, DECIMALS[m])]
             rows.append(" & ".join([METRIC_LABEL[m], g, *cells]) + r" \\")
     return table(rec, "Paired difference of the mean over the 14 incomplete patterns, each subject "
                  "averaged over the seeds", "summary", "ll" + "rr" * len(H2_COMPARISONS),
                  group_head(H2_COMPARISONS, 2, ["Metric", "Region"], ["Diff", "CI"]), rows,
-                 f" Star: Holm adjusted two sided p below {rec['alpha']:g} over the 3 comparisons, "
-                 "in either direction.")
+                 f" Star: the paired test alone, Holm adjusted two sided p below {rec['alpha']:g} "
+                 "over the 3 comparisons, in either direction. Dagger: the seeds did not all back "
+                 "it, so no claim is made.")
 
 
 def cost_table(summary, h3, rec):
@@ -199,17 +216,17 @@ def cost_table(summary, h3, rec):
     for c in H3_COMPARISONS:
         for g in REGIONS:
             r = summary["H3", "dice", g, "complete", c]
-            word, agree = h3[c, g]
+            word, agree, within = h3[c, g]
             low, high = float(r["ci_low"]), float(r["ci_high"])
             rows.append(" & ".join([
                 c, g, f"{float(r['mean_diff']):+.{FINE}f}", f"{float(r['median_diff']):+.{FINE}f}",
-                interval(r, FINE), f"{max(abs(low), abs(high)):.{FINE}f}", agree,
+                interval(r, FINE), f"{max(abs(low), abs(high)):.{FINE}f}", agree, within,
                 f"{float(r['p_raw']):.3g}", word]) + r" \\")
     return table(rec, "Complete input cost: paired Dice difference at pattern 1", "cost",
-                 "llrrrrrrl",
+                 "llrrrrrrrl",
                  [COST_HEAD], rows,
                  f" Equivalence margin {rec['equiv_margin']:g} Dice. The label comes from the CI "
-                 "alone; the p value is reported beside it.")
+                 f"and the seeds; the p value is reported beside it.{SPLIT_NOTE}")
 
 
 def exposure_table(summary, h4, rec):
@@ -219,13 +236,15 @@ def exposure_table(summary, h4, rec):
         c = summary["H4", "dice", g, "complete", "E3b-E3"]
         primary = summary["H4", "dice", g, "incomplete", "E3b-E3"]
         e1 = summary["descriptive", "dice", g, "complete", "E3b-E1"]
+        word, agree, not_worse = h4[g]
         rows.append(" & ".join([
             g, f"{float(c['mean_diff']):+.{FINE}f}", f"{float(c['median_diff']):+.{FINE}f}",
-            f"{float(c['p_raw']):.3g}", f"{float(primary['ci_low']):+.{FINE}f}", h4[g],
+            f"{float(c['p_raw']):.3g}", f"{float(primary['ci_low']):+.{FINE}f}", agree, not_worse,
+            word,
             f"{float(e1['mean_diff']):+.{FINE}f}", interval(e1, FINE)]) + r" \\")
-    return table(rec, "Exposure arm: E3b against E3 on Dice", "exposure", "lrrrrlrr",
+    return table(rec, "Exposure arm: E3b against E3 on Dice", "exposure", "lrrrrrrlrr",
                  [EXPOSURE_HEAD], rows,
-                 " E3b-E1 is descriptive and has no verdict.")
+                 f" E3b-E1 is descriptive and has no verdict.{SPLIT_NOTE}")
 
 
 def pattern_table(patterns, rec, metric, stat, what, name):
@@ -296,8 +315,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     rec = finished_run(a.compare)
     summary, patterns, per_seed, volume = read_compare(a.compare)
-    h3, h4 = read_verdict(a.compare)
-    files = {"summary": summary_table(summary, rec),
+    h2, h3, h4 = read_verdict(a.compare)
+    files = {"summary": summary_table(summary, h2, rec),
              "cost": cost_table(summary, h3, rec),
              "exposure": exposure_table(summary, h4, rec),
              "patterns-dice": pattern_table(patterns, rec, "dice", "mean",

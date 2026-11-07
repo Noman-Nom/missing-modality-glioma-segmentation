@@ -1,7 +1,7 @@
 """Spec 0006: compare_seeds.py on toy run and eval folders with known answers. Covers AC-9 to AC-11,
 AC-13, and the H2 part of AC-24. Nothing here trains or scores a model, and no number here is a
 result. Each test is one rule, stated in its name, shown on 12 toy folders. Also covers AC-7 and
-AC-12 to AC-22, AC-24 to AC-26, AC-28 and AC-29 to AC-31."""
+AC-12 to AC-22, AC-24 to AC-26, AC-28 and AC-29 to AC-35."""
 import csv
 import hashlib
 import importlib.util
@@ -20,8 +20,10 @@ from common.data import REGIONS
 from common.evaluation import (
     LITERATURE_GATE,
     METRIC_COLUMNS,
+    PREFLIGHT,
     PREREG_TAG,
     PROTOCOL_FILES,
+    SEALED_FILES,
     protocol_hash,
 )
 from common.missing import PATTERNS
@@ -116,7 +118,7 @@ def tagged_repo(tmp_path_factory):
     git("init", "-q")
     git("commit", "-q", "--allow-empty", "-m", "before")
     before = git("rev-parse", "HEAD")
-    sealed = repo / cs.SEALED_FILES[0]
+    sealed = repo / SEALED_FILES[0]
     gate = repo / LITERATURE_GATE
     gate.parent.mkdir(parents=True)
     sealed.parent.mkdir(parents=True)
@@ -237,6 +239,9 @@ class World:
     def folder(self):
         return self.out / "compare-val"
 
+    def record(self):
+        return self.folder() / PREFLIGHT
+
     def summary(self):
         return pd.read_csv(self.folder() / "summary.csv")
 
@@ -248,8 +253,12 @@ def world(tmp_path, tagged_repo, monkeypatch):
     monkeypatch.setattr(cs, "EXPECTED_PROTOCOL_HASH", PROTOCOL)
     monkeypatch.setattr(cs, "protocol_hash", lambda: PROTOCOL)
     monkeypatch.setattr(cs, "git_info", lambda: (after, False))
-    # the gate inside evaluation.py, which keeps its own paths and its own view of the tag
+    monkeypatch.setattr(cs, "compare_hash", lambda: "sealed")
+    # the gate inside evaluation.py, which keeps its own paths and its own view of the tag. The
+    # seal asks git, so it is the real one, on the tiny repo
     w = World(tmp_path, after)
+    monkeypatch.setattr("common.evaluation.REPO", repo)
+    monkeypatch.setattr("common.evaluation.compare_hash", lambda: "sealed")
     (tmp_path / "test-gate.md").write_text(GOOD_GATE)
     monkeypatch.setattr("common.evaluation.GATE_FILE", tmp_path / "test-gate.md")
     monkeypatch.setattr("common.evaluation.COMPARE_VAL", w.folder())
@@ -309,15 +318,27 @@ def test_a_seed_that_differs_moves_the_arm_by_a_third(world):
 
 # covers: AC-24, spec 0005 is the reference
 def test_three_identical_seeds_give_the_lines_of_the_old_compare(world):
-    frames = {s: pd.read_csv(world.eval_dir((s[0], 42)) / "metrics.csv") for s in cs.slots()}
+    def exact(arm):
+        """Steps of 0.25 are exact in binary, so a mean of three copies is the copy itself, and no
+        strict comparison can move. The gain grows with the case, so no two d tie."""
+        df = pd.read_csv(world.eval_dir((arm, 42)) / "metrics.csv")
+        i = df["case"].map(INDEX)
+        gain = {"e1": 0, "e3": 1, "e4": 2, "e3b": 1}[arm]
+        return df.assign(dice=0.25 * (1 + gain * (1 + i) * (df["pattern_id"] > 1)),
+                         hd95_mm=0.25 * (40 - gain * i))
+
+    frames = {s: exact(s[0]) for s in cs.slots()}
     single = {arm: frames[arm, 42] for arm in ("e1", "e3", "e4")}
     idx = np.random.default_rng(0).integers(0, N, size=(500, N))
     old = [r for m in old_compare.METRICS for g in REGIONS
            for r in old_compare.summary_rows(single, m, g, idx)]
     means = cs.averaged(frames)
     new = [r for m in cs.METRICS for g in REGIONS for r in cs.h2_rows(means, m, g, idx)]
-    assert old_compare.verdict(old, 0.05) == cs.h2_verdict(new, 0.05)
-    assert len(new) == 72 and len(cs.h2_verdict(new, 0.05)) == 9
+    lines = cs.h2_verdict(new, 0.05, cs.per_seed_rows(frames))
+    assert len(new) == 72 and len(lines) == 9
+    assert all(", seeds_agree=3/3)" in line or ", seeds_agree=0/3)" in line for line in lines)
+    assert old_compare.verdict(old, 0.05) == [
+        re.sub(r", seeds_agree=\d/3\)$", ")", line) for line in lines]
     for a, b in zip(old, new, strict=True):
         assert (a["metric"], a["region"], a["level"], a["comparison"]) == (
             b["metric"], b["region"], b["level"], b["comparison"])
@@ -570,10 +591,10 @@ def test_h3_line_holds_every_field_on_a_known_row():
                 for v in (-0.01, -0.02, 0.03)]
     lines = cs.h3_verdict(summary, per_seed)
     assert len(lines) == 6
-    assert lines[0] == ("H3a WT: equivalent (E3-E1, mean_diff=-0.002000, median_diff=+0.001000, "
+    assert lines[0] == ("H3a WT: split (E3-E1, mean_diff=-0.002000, median_diff=+0.001000, "
                         "ci=[-0.004000, +0.003500], min_margin=0.004000, seeds_agree=2/3, "
-                        "p_raw=0.25)")
-    assert lines[3].startswith("H3b WT: equivalent (E4-E1,")
+                        "seeds_within=1/3, p_raw=0.25)")
+    assert lines[3].startswith("H3b WT: split (E4-E1,")
 
 
 def test_seeds_agree_ignores_other_regions_levels_and_metrics():
@@ -588,10 +609,26 @@ def test_seeds_agree_ignores_other_regions_levels_and_metrics():
     assert cs.seeds_agree([*other, mine], "WT", "E3-E1", 0.5) == 1
 
 
+def seed_rows(name, complete=(0.01, 0.01, 0.01), incomplete=(0.01, 0.01, 0.01)):
+    """per_seed rows of one comparison in every region. By default all the seeds back a claim."""
+    return [{"metric": "dice", "region": g, "level": level, "comparison": name, "mean_diff": v}
+            for g in REGIONS
+            for level, values in (("complete", complete), ("incomplete", incomplete))
+            for v in values]
+
+
+JUST_INSIDE = float(np.nextafter(0.015, 0.0))  # the nearest float inside the margin
+JUST_OUTSIDE = float(np.nextafter(0.015, 1.0))  # the nearest float outside it
+
+
+def word_of(line):
+    return line.split(":")[1].split(" (")[0].strip()
+
+
 def h4_word(complete, primary):
     rows = cs.h4_rows(toy_means({"e3b": complete}, {"e3b": primary}), "WT", BIG_IDX)
     summary = [{**r, "region": g} for g in REGIONS for r in rows]
-    return cs.h4_verdict(summary, 0.05)[0].split(":")[1].split(" (")[0].strip()
+    return word_of(cs.h4_verdict(summary, 0.05, seed_rows("E3b-E3"))[0])
 
 
 GAIN = np.linspace(0.01, 0.03, BIG)
@@ -639,9 +676,117 @@ def test_h4_line_is_the_template():
     summary = [{"family": "H4", "region": g, "level": level, "mean_diff": 0.01, "median_diff": 0.02,
                 "p_raw": 0.001, "ci_low": -0.01} for g in REGIONS
                for level in ("complete", "incomplete")]
-    assert cs.h4_verdict(summary, 0.05)[0] == (
+    assert cs.h4_verdict(summary, 0.05, seed_rows("E3b-E3"))[0] == (
         "H4 WT: supported (E3b-E3, complete_mean_diff=+0.010000, complete_median_diff=+0.020000, "
-        "complete_p=0.001, primary_ci90_low=-0.010000)")
+        "complete_p=0.001, primary_ci90_low=-0.010000, seeds_agree=3/3, seeds_not_worse=3/3)")
+
+
+# ---- the seed rule (AC-32, AC-24): a claim needs the averaged test and all 3 seeds ----
+
+def h2_line(mean_diff, p_holm, seeds):
+    summary = [{"family": "H2", "metric": "dice", "region": g, "level": "incomplete",
+                "comparison": c, "mean_diff": mean_diff, "p_holm": p_holm}
+               for g in REGIONS for c in ("E3-E1", "E4-E1", "E4-E3")]
+    per_seed = [r for c in ("E3-E1", "E4-E1", "E4-E3") for r in seed_rows(c, incomplete=seeds)]
+    return cs.h2_verdict(summary, 0.05, per_seed)[0]
+
+
+@pytest.mark.parametrize(("mean_diff", "p_holm", "seeds", "word", "count"), [
+    (0.01, 0.01, (0.01, 0.02, 0.03), "supported", "3/3"),
+    (0.01, 0.01, (-0.01, 0.02, 0.03), "split", "2/3"),
+    (0.01, 0.01, (0.0, 0.02, 0.03), "split", "2/3"),  # zero is not above zero
+    (0.01, 0.2, (-0.01, 0.02, 0.03), "not supported", "2/3"),  # no claim, so the word stays
+    (-0.01, 0.01, (-0.01, -0.02, -0.03), "not supported", "0/3"),
+])
+def test_h2_seed_rule(mean_diff, p_holm, seeds, word, count):
+    line = h2_line(mean_diff, p_holm, seeds)
+    assert word_of(line) == word
+    assert line.endswith(f", seeds_agree={count})")
+
+
+def h3_line(ci, mean_diff, seeds):
+    summary = [{"family": "H3", "region": g, "comparison": c, "mean_diff": mean_diff,
+                "median_diff": mean_diff, "ci_low": ci[0], "ci_high": ci[1], "p_raw": 0.5}
+               for g in REGIONS for c in ("E3-E1", "E4-E1")]
+    per_seed = [r for c in ("E3-E1", "E4-E1") for r in seed_rows(c, complete=seeds)]
+    return cs.h3_verdict(summary, per_seed)[0]
+
+
+@pytest.mark.parametrize(("ci", "mean_diff", "seeds", "word", "agree", "within"), [
+    # three seeds of mixed sign, all inside the margin: signs do not matter for this word
+    ((-0.005, 0.005), 0.001, (-0.01, 0.002, 0.01), "equivalent", "2/3", "3/3"),
+    ((-0.005, 0.005), 0.001, (-0.02, 0.002, 0.021), "split", "2/3", "1/3"),
+    ((-0.005, 0.005), 0.001, (0.015, 0.0, -0.014), "split", "1/3", "2/3"),  # the bound is strict
+    ((-0.03, -0.02), -0.025, (-0.03, -0.02, -0.025), "cost", "3/3", "0/3"),
+    ((-0.03, -0.02), -0.025, (-0.05, -0.04, 0.015), "split", "2/3", "0/3"),
+    ((0.02, 0.03), 0.025, (0.03, 0.02, 0.025), "gain", "3/3", "0/3"),
+    ((0.02, 0.03), 0.025, (0.05, 0.04, -0.015), "split", "2/3", "0/3"),
+    ((-0.02, 0.01), -0.005, (-0.03, 0.01, 0.005), "inconclusive", "1/3", "2/3"),  # no claim
+    # one step of a float from the bound, on each side of it
+    ((-0.005, 0.005), 0.001, (JUST_INSIDE, -JUST_INSIDE, 0.002), "equivalent", "2/3", "3/3"),
+    ((-0.005, 0.005), 0.001, (JUST_OUTSIDE, 0.0, 0.001), "split", "2/3", "2/3"),
+    ((-0.005, 0.005), 0.001, (-JUST_OUTSIDE, 0.0, 0.001), "split", "1/3", "2/3"),
+    # an averaged difference of exactly zero: this word uses seeds_within only
+    ((-0.005, 0.005), 0.0, (0.001, -0.001, 0.002), "equivalent", "0/3", "3/3"),
+    # a seed at zero has no sign, so it does not back a cost
+    ((-0.03, -0.02), -0.025, (0.0, -0.02, -0.03), "split", "2/3", "1/3"),
+])
+def test_h3_seed_rule(ci, mean_diff, seeds, word, agree, within):
+    line = h3_line(ci, mean_diff, seeds)
+    assert word_of(line) == word
+    assert f"seeds_agree={agree}, seeds_within={within}," in line
+
+
+def h4_line(complete, incomplete, mean_diff=0.01):
+    summary = [{"family": "H4", "region": g, "level": level, "mean_diff": mean_diff,
+                "median_diff": 0.02, "p_raw": 0.001, "ci_low": -0.01} for g in REGIONS
+               for level in ("complete", "incomplete")]
+    return cs.h4_verdict(summary, 0.05, seed_rows("E3b-E3", complete, incomplete))[0]
+
+
+@pytest.mark.parametrize(("complete", "incomplete", "word", "agree", "not_worse"), [
+    ((0.01, 0.02, 0.03), (-0.01, 0.0, 0.01), "supported", "3/3", "3/3"),
+    ((-0.01, 0.02, 0.03), (0.0, 0.0, 0.0), "split", "2/3", "3/3"),
+    ((0.01, 0.02, 0.03), (-0.02, 0.0, 0.0), "split", "3/3", "2/3"),
+    ((0.01, 0.02, 0.03), (-0.015, 0.0, 0.0), "split", "3/3", "2/3"),  # the bound is strict
+    ((0.01, 0.02, 0.03), (-JUST_INSIDE, 0.0, 0.0), "supported", "3/3", "3/3"),
+    ((0.0, 0.02, 0.03), (0.0, 0.0, 0.0), "split", "2/3", "3/3"),  # zero is not above zero
+])
+def test_h4_seed_rule(complete, incomplete, word, agree, not_worse):
+    line = h4_line(complete, incomplete)
+    assert word_of(line) == word
+    assert line.endswith(f"seeds_agree={agree}, seeds_not_worse={not_worse})")
+
+
+def test_h4_with_no_claim_keeps_its_word():
+    assert word_of(h4_line((-0.01, 0.02, 0.03), (0.0, 0.0, 0.0), mean_diff=-0.01)) == "not supported"
+
+
+# covers: AC-32, the margin in the seed check is EQUIV_MARGIN, not a second typed number
+def test_h3_seeds_within_follows_the_margin(monkeypatch):
+    seeds = (0.02, 0.0, -0.02)
+    assert "seeds_within=1/3," in h3_line((-0.005, 0.005), 0.001, seeds)
+    monkeypatch.setattr(cs, "EQUIV_MARGIN", 0.03)
+    assert "seeds_within=3/3," in h3_line((-0.005, 0.005), 0.001, seeds)
+
+
+def test_h4_seeds_not_worse_follows_the_margin(monkeypatch):
+    incomplete = (-0.02, 0.0, 0.0)
+    assert h4_line((0.01, 0.02, 0.03), incomplete).endswith("seeds_not_worse=2/3)")
+    monkeypatch.setattr(cs, "EQUIV_MARGIN", 0.03)
+    assert h4_line((0.01, 0.02, 0.03), incomplete).endswith("seeds_not_worse=3/3)")
+
+
+# covers: AC-32, end to end: seed 42 of E3 loses to E1, the other two carry the average
+def test_one_seed_against_a_passing_test_reads_split_in_the_verdict(world):
+    s = ("e3", 42)
+    world.dice[s] = lambda c, p, g: base(c, p) + (p > 1) * (-0.03 + 0.0011 * INDEX[c])
+    write_metrics(world.eval_dir(s) / "metrics.csv", world.dice[s], world.hd95[s], toy_bias(*s))
+    assert world.run() == 0
+    lines = (world.folder() / "verdict.txt").read_text().splitlines()
+    assert len(lines) == 18
+    assert lines[0].startswith("H2a WT: split (E3-E1,") and lines[0].endswith("seeds_agree=2/3)")
+    assert lines[3].startswith("H2b WT: supported (E4-E1,")
 
 
 def rows_of(t, **fields):
@@ -712,6 +857,8 @@ def test_run_json_holds_the_record_and_comes_with_every_output(world):
         "summary.csv", "patterns.csv", "per_seed.csv", "volume.csv", "verdict.txt", "run.json"}
     rec = json.loads((world.folder() / "run.json").read_text())
     assert tuple(rec) == cs.RUN_JSON_KEYS
+    assert rec["eval_sha256"] == {cs.slot_key(s): sha256_file(world.eval_dir(s) / "metrics.csv")
+                                  for s in cs.slots()}
     assert rec["status"] == "ok" and rec["n_cases"] == N and rec["seeds"] == [42, 43, 44]
     assert rec["equiv_margin"] == 0.015 and rec["prereg_tag"] == PREREG_TAG
     assert rec["run_ids"]["e3b_seed44"] == "e3b-44" and len(rec["run_ids"]) == 12
@@ -720,15 +867,17 @@ def test_run_json_holds_the_record_and_comes_with_every_output(world):
     assert rec["compare_hash"] == cs.compare_hash() and rec["alpha"] == 0.05
 
 
-# covers: AC-28, the hash only here; the refusal comes with build step 6
+# covers: AC-28, AC-33, the hash and the wider list
 def test_compare_hash_is_over_the_sealed_files_in_order():
-    assert cs.SEALED_FILES[:len(PROTOCOL_FILES)] == PROTOCOL_FILES
-    assert cs.SEALED_FILES[len(PROTOCOL_FILES):] == (
+    assert SEALED_FILES[:len(PROTOCOL_FILES)] == PROTOCOL_FILES
+    assert SEALED_FILES[len(PROTOCOL_FILES):] == (
         "experiments/common/strategies.py", "experiments/common/model.py",
         "experiments/0004-missing-eval/evaluate.py",
-        "experiments/0007-confirmation/compare_seeds.py")
+        "experiments/0007-confirmation/compare_seeds.py", "experiments/common/runlog.py",
+        "experiments/common/cache.py", "experiments/common/data.py",
+        "experiments/0007-confirmation/rq1_seeds.py")
     assert cs.compare_hash() == hashlib.sha256(
-        b"".join((REPO / n).read_bytes() for n in cs.SEALED_FILES)).hexdigest()
+        b"".join((REPO / n).read_bytes() for n in SEALED_FILES)).hexdigest()
 
 
 # covers: AC-17, rerun rules
@@ -908,6 +1057,28 @@ def test_cost_and_exposure_words_are_the_verdicts(world, tmp_path):
     assert cost.count("marker") == 1
 
 
+# covers: AC-29, AC-32, a split takes its word from verdict.txt
+def test_split_reaches_the_tables_with_its_counts(world, tmp_path):
+    assert world.run() == 0
+    verdict = world.folder() / "verdict.txt"
+    text = verdict.read_text()
+    assert "H2a WT: supported" in text and "H4 WT: " in text
+    text = re.sub(r"^H4 WT: [a-z ]+ \(", "H4 WT: split (", text, flags=re.MULTILINE)
+    text = re.sub(r"^H3a WT: \w+ \(", "H3a WT: split (", text, flags=re.MULTILINE)
+    verdict.write_text(text.replace("H2a WT: supported", "H2a WT: split"))
+    out, code = tables(world, tmp_path)
+    assert code == 0
+    cost = (out / "0007-confirmation-val-cost.tex").read_text()
+    exposure = (out / "0007-confirmation-val-exposure.tex").read_text()
+    summary = (out / "0007-confirmation-val-summary.tex").read_text()
+    assert "Seeds within" in cost and re.search(r"& \d/3 & \d/3 & \S+ & split", cost)
+    assert "Seeds not worse" in exposure and re.search(r"& \d/3 & \d/3 & split", exposure)
+    assert summary.count(r"\dagger") == 1 and "Dagger: " in summary
+    assert "seeds did not all back it, so no claim is made" in summary
+    dice_wt = next(ln for ln in summary.splitlines() if ln.startswith("Dice & WT"))
+    assert "$^{*}$$^{\\dagger}$" in dice_wt
+
+
 def test_seeds_table_has_a_row_per_metric_level_region_comparison(world, tmp_path):
     assert world.run() == 0
     out, _ = tables(world, tmp_path)
@@ -934,6 +1105,33 @@ def test_a_missing_file_stops_and_keeps_older_tables(world, tmp_path, name):
         tables(world, tmp_path)
     assert "ERROR" in str(e.value) and name in str(e.value)
     assert before == {p: p.read_bytes() for p in out.iterdir()}
+
+
+# covers: AC-29, verdict words come from verdict.txt only, so a damaged file writes nothing
+@pytest.mark.parametrize("index", [0, 9, 15], ids=["H2", "H3", "H4"])
+def test_a_verdict_with_a_line_gone_stops_and_keeps_older_tables(world, tmp_path, index):
+    assert world.run() == 0
+    out, _ = tables(world, tmp_path)
+    before = {p: p.read_bytes() for p in out.iterdir()}
+    verdict = world.folder() / "verdict.txt"
+    lines = verdict.read_text().splitlines()
+    verdict.write_text("\n".join(lines[:index] + lines[index + 1:]) + "\n")
+    with pytest.raises(SystemExit, match="lines in verdict.txt"):
+        tables(world, tmp_path)
+    assert before == {p: p.read_bytes() for p in out.iterdir()}
+
+
+# covers: AC-29, H2 and H4 accept only their own three words
+@pytest.mark.parametrize("index", [0, 15], ids=["H2", "H4"])
+def test_a_verdict_with_an_unknown_word_stops(world, tmp_path, index):
+    assert world.run() == 0
+    verdict = world.folder() / "verdict.txt"
+    lines = verdict.read_text().splitlines()
+    head, _, rest = lines[index].partition(": ")
+    lines[index] = f"{head}: maybe ({rest.partition(' (')[2]}"
+    verdict.write_text("\n".join(lines) + "\n")
+    with pytest.raises(SystemExit, match="lines in verdict.txt"):
+        tables(world, tmp_path)
 
 
 def test_a_run_that_is_not_ok_stops(world, tmp_path):
@@ -966,6 +1164,7 @@ def finish_val(world):
 
 def opened(world):
     finish_val(world)
+    assert world.preflight() == 0
     world.open_test()
 
 
@@ -981,16 +1180,135 @@ def refused_preflight(world, capsys, message):
     assert world.preflight() == 2
     assert message in capsys.readouterr().out
     assert sorted(p.name for p in world.out.iterdir()) == before
+    assert not world.record().exists()
 
 
-# covers: AC-20, happy path, the preflight then the test compare
-def test_the_preflight_passes_and_writes_nothing(world, capsys):
+def kept_preflight(world, capsys, *entries):
+    """A refusal after the opening: one line per entry, and the record byte for byte the same."""
+    before = world.record().read_bytes()
+    assert world.preflight() == 2
+    out = capsys.readouterr().out
+    for entry in entries:
+        assert (f"ERROR: {entry} exists: the test was opened already, so {PREFLIGHT} stays "
+                "as it is") in out
+    assert world.record().read_bytes() == before
+
+
+# covers: AC-20, AC-34, happy path, the preflight then the test compare
+def test_the_preflight_passes_and_writes_only_its_record(world, capsys):
     finish_val(world)
     before = sorted(p.name for p in world.out.iterdir())
+    inside = {p.name for p in world.folder().iterdir()}
     assert world.preflight() == 0
     assert "preflight PASS" in capsys.readouterr().out
     assert sorted(p.name for p in world.out.iterdir()) == before
+    assert {p.name for p in world.folder().iterdir()} == inside | {PREFLIGHT}
+    rec = json.loads(world.record().read_text())
+    assert (rec["status"], rec["git_commit"]) == ("ok", world.commit) and set(rec) == {
+        "status", "git_commit", "date"}
     assert not list(world.evals.glob("*-test"))
+
+
+# covers: AC-34, a failed preflight leaves no record, even over an older pass
+def test_a_refused_preflight_deletes_the_older_record(world, capsys):
+    finish_val(world)
+    assert world.preflight() == 0
+    (world.root / "test-gate.md").write_text(GOOD_GATE.replace("status: pass", "status: fail"))
+    refused_preflight(world, capsys, "status is 'fail'")
+
+
+def test_a_rerun_of_the_val_compare_moves_the_record_away(world):
+    finish_val(world)
+    assert world.preflight() == 0
+    assert world.run("val", "--rerun-reason", "because") == 0
+    assert not world.record().exists()
+    assert list(world.out.glob("compare-val.superseded-*/" + PREFLIGHT))
+
+
+# covers: AC-34, reachability
+def test_the_preflight_refuses_a_val_compare_that_is_not_an_ancestor(world, capsys, tagged_repo):
+    finish_val(world)
+    world.edit(world.folder() / "run.json", git_commit=tagged_repo[4])
+    refused_preflight(world, capsys, "is not an ancestor of")
+
+
+# covers: AC-35, the record, through the preflight
+@pytest.mark.parametrize(("fields", "message"), [
+    ({"fold": "test"}, "val compare: fold is 'test'"),
+    ({"prereg_tag": "prereg-v0"}, "val compare: prereg_tag is 'prereg-v0'"),
+    ({"git_dirty": True}, "val compare: git_dirty is True"),
+    ({"eval_sha256": {}}, "no eval_sha256 entry"),
+])
+def test_the_preflight_refuses_a_val_compare_record(world, capsys, fields, message):
+    finish_val(world)
+    world.edit(world.folder() / "run.json", **fields)
+    refused_preflight(world, capsys, message)
+
+
+def test_the_preflight_refuses_a_val_metrics_changed_after_the_compare(world, capsys):
+    finish_val(world)
+    with open(world.eval_dir(S) / "metrics.csv", "a") as f:
+        f.write("\n")
+    refused_preflight(world, capsys, "changed since the val compare")
+
+
+def test_the_preflight_lists_a_val_metrics_gone_after_the_compare(world, capsys):
+    finish_val(world)
+    (world.eval_dir(S) / "metrics.csv").unlink()
+    refused_preflight(world, capsys, "the val compare read it")
+
+
+# covers: AC-10, the clean tree, on val only
+@pytest.mark.parametrize(("dirty", "message"), [(True, "git_dirty is True"),
+                                                (None, "git_dirty is None")])
+def test_the_val_compare_needs_a_clean_tree(world, capsys, monkeypatch, dirty, message):
+    monkeypatch.setattr(cs, "git_info", lambda: (world.commit, dirty))
+    assert world.run() == 2
+    out = capsys.readouterr().out
+    assert message in out and "an untracked file counts too" in out
+    assert not world.folder().exists()
+
+
+def test_the_test_compare_records_dirt_and_does_not_refuse_it(world, monkeypatch):
+    opened(world)
+    monkeypatch.setattr(cs, "git_info", lambda: (world.commit, True))
+    assert world.run("test") == 0
+    assert json.loads((world.out / "compare-test" / "run.json").read_text())["git_dirty"] is True
+
+
+# covers: AC-34, so the record cannot be lost after the opening
+def test_the_val_compare_refuses_once_a_test_eval_exists(world, capsys):
+    opened(world)
+    assert world.run("val", "--rerun-reason", "again") == 2
+    assert "the test was opened" in capsys.readouterr().out
+    assert world.record().exists()
+
+
+# covers: AC-28, the commit tie after the sweeps
+def test_a_test_eval_from_another_commit_is_refused(world, capsys, tagged_repo):
+    opened(world)
+    world.edit(world.record(), git_commit=tagged_repo[1])
+    refused_test(world, capsys, "is not the preflight's")
+
+
+def test_the_test_compare_needs_the_preflight_record(world, capsys):
+    opened(world)
+    world.record().unlink()
+    refused_test(world, capsys, "the preflight did not pass")
+
+
+# covers: AC-35, all 12 val files again
+def test_the_test_compare_refuses_a_val_metrics_changed_after_the_compare(world, capsys):
+    opened(world)
+    with open(world.eval_dir(S) / "metrics.csv", "a") as f:
+        f.write("\n")
+    refused_test(world, capsys, "changed since the val compare")
+
+
+def test_the_test_compare_lists_a_val_metrics_gone(world, capsys):
+    opened(world)
+    (world.eval_dir(S) / "metrics.csv").unlink()
+    refused_test(world, capsys, "the val compare read it")
 
 
 # covers: AC-17, AC-18, AC-28 on the test fold
@@ -1063,7 +1381,7 @@ def test_a_val_compare_of_other_runs_is_refused(world, capsys):
 # changed margin is a changed compare_hash
 def test_a_changed_sealed_file_since_val_is_refused(world, capsys, monkeypatch):
     opened(world)
-    monkeypatch.setattr(cs, "compare_hash", lambda: "another margin")
+    monkeypatch.setattr("common.evaluation.compare_hash", lambda: "another margin")
     refused_test(world, capsys, "compare_hash differs")
 
 
@@ -1150,10 +1468,133 @@ def test_the_preflight_refuses_a_run_the_val_compare_does_not_list(world, capsys
     refused_preflight(world, capsys, "val compare does not list run e4-44")
 
 
-# covers: AC-31, after the opening no amendment exists
+# covers: AC-31, AC-34, after the opening no amendment exists, and the record stays
 def test_the_preflight_refuses_after_the_opening(world, capsys):
     opened(world)
-    refused_preflight(world, capsys, "the test was opened already")
+    entries = sorted(world.evals.glob("*-test"))
+    assert len(entries) == 12
+    kept_preflight(world, capsys, *entries)
+    assert world.run("test") == 0
+
+
+# covers: AC-34, any entry counts, finished or not, file or folder
+@pytest.mark.parametrize("make", [Path.mkdir, Path.touch], ids=["folder", "file"])
+def test_a_stray_test_entry_keeps_the_record(world, capsys, make):
+    finish_val(world)
+    assert world.preflight() == 0
+    stray = world.evals / "not-a-slot-test"
+    make(stray)
+    kept_preflight(world, capsys, stray)
+
+
+# covers: AC-34, only a name that ends in -test counts, and a missing folder is no crash
+def test_opened_folders_finds_only_test_entries_in_order(tmp_path):
+    for name in ("b-test", "a-val", "compare-val", "a-testing", "test"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "a-test").touch()
+    assert [p.name for p in cs.opened_folders(tmp_path)] == ["a-test", "b-test"]
+
+
+def test_opened_folders_of_a_folder_not_there_is_empty(tmp_path):
+    assert cs.opened_folders(tmp_path / "nothing") == []
+
+
+GOOD_RECORD = {"status": "ok", "fold": "val", "prereg_tag": PREREG_TAG, "git_dirty": False,
+               "git_commit": "abc", "compare_hash": "same"}
+
+
+@pytest.fixture
+def known_tag(monkeypatch):
+    """Only commit abc descends from the tag, and the sealed files hash to `same`."""
+    monkeypatch.setattr("common.evaluation.descends_from_tag", lambda commit, *a: commit == "abc")
+    monkeypatch.setattr("common.evaluation.compare_hash", lambda: "same")
+
+
+# covers: AC-35, a whole record passes
+def test_a_whole_val_record_passes(known_tag):
+    assert cs.val_record_problems(GOOD_RECORD) == []
+
+
+# covers: AC-35, each rule alone, so no rule hides behind another
+@pytest.mark.parametrize(("field", "value", "message"), [
+    ("status", "failed", "status is 'failed'"),
+    ("fold", "test", "fold is 'test'"),
+    ("prereg_tag", "prereg-v0", "prereg_tag is 'prereg-v0'"),
+    ("git_dirty", True, "git_dirty is True"),
+    ("git_dirty", None, "git_dirty is None"),
+    ("git_dirty", 0, "git_dirty is 0"),  # only False itself says the tree was clean
+    ("git_commit", "other", "commit other does not descend"),
+    ("compare_hash", "moved", "a sealed file moved"),
+])
+def test_one_wrong_field_gives_one_error(known_tag, field, value, message):
+    errors = cs.val_record_problems(GOOD_RECORD | {field: value})
+    assert len(errors) == 1 and message in errors[0]
+
+
+# covers: AC-35, a record with nothing in it lists every rule, with no KeyError
+def test_an_empty_val_record_lists_all_six_rules(known_tag):
+    assert len(cs.val_record_problems({})) == 6
+
+
+# covers: AC-35, the file check, in the order the gate relies on
+def test_a_val_file_that_matches_its_entry_passes(tmp_path):
+    path = tmp_path / "metrics.csv"
+    path.write_text("a")
+    assert cs.val_file_problems(path, sha256_file(path)) == []
+
+
+def test_a_val_file_one_byte_off_is_refused(tmp_path):
+    path = tmp_path / "metrics.csv"
+    path.write_text("a")
+    want = sha256_file(path)
+    path.write_text("b")
+    assert cs.val_file_problems(path, want) == [f"{path} changed since the val compare"]
+
+
+def test_a_val_file_gone_is_a_listed_error(tmp_path):
+    path = tmp_path / "metrics.csv"
+    assert cs.val_file_problems(path, "0" * 64) == [f"{path} missing, the val compare read it"]
+
+
+@pytest.mark.parametrize("want", [None, ""])
+def test_no_entry_is_reported_ahead_of_a_missing_file(tmp_path, want):
+    path = tmp_path / "metrics.csv"
+    assert cs.val_file_problems(path, want) == [f"val compare: no eval_sha256 entry for {path}"]
+
+
+# covers: AC-34, the refusal comes ahead of every early return
+def test_a_bad_manifest_after_the_opening_keeps_the_record(world, capsys):
+    opened(world)
+    world.manifest.write_text("[e1\n")
+    kept_preflight(world, capsys, *sorted(world.evals.glob("*-test")))
+
+
+# covers: AC-34, a wrong flag touches nothing
+def test_a_preflight_on_the_val_fold_keeps_the_record(world, capsys):
+    finish_val(world)
+    assert world.preflight() == 0
+    before = world.record().read_bytes()
+    assert world.run("val", "--preflight") == 2
+    assert "only for --fold test" in capsys.readouterr().out
+    assert world.record().read_bytes() == before
+
+
+# covers: AC-34, one list for all three callers
+def test_only_opened_folders_globs_the_test_entries():
+    source = (REPO / "experiments" / "0007-confirmation" / "compare_seeds.py").read_text()
+    assert source.count('glob("*-test")') == 1
+    assert source.count("opened_folders(") == 4  # the def, main, guards, val_side_problems
+    body = source[source.index("def preflight_problems"):source.index("def guards")]
+    assert "-test" not in body
+
+
+# covers: AC-34, step 7 brings the record back before the test compare
+def test_step_7_restores_the_record_from_the_output():
+    text = (REPO / "experiments" / "0007-confirmation" / "KAGGLE.md").read_text()
+    step = text[text.index("## Step 7"):text.index("## The amendment path")]
+    copy = step.index("confirmation/compare-val/preflight.json")
+    assert step.index("-test/` folders") < copy < step.index("--fold test")
+    assert "stays as it is" in text[text.index("### The preflight"):text.index("## Step 6")]
 
 
 # covers: AC-31
@@ -1198,7 +1639,8 @@ def write_verdict(root, seed, lines, **fields):
     d.mkdir()
     (d / "verdict.txt").write_text("\n".join(lines) + "\n")
     (d / "run.json").write_text(json.dumps(
-        {"status": "ok", "quick": False, "fold": "test", "source_seed": seed} | fields))
+        {"status": "ok", "quick": False, "fold": "test", "source_seed": seed,
+         "source_run_id": f"e1-{seed}", "protocol_hash": PROTOCOL} | fields))
     return d
 
 
@@ -1207,7 +1649,9 @@ SPLIT = ["H1a WT: not supported (patterns 2, 3)", "H1b WT: supported (n_missing=
 
 
 def rq1_args(dirs, out):
-    return [x for d in dirs for x in ("--eval", str(d))] + ["--out", str(out)]
+    runs = out.parent / "rq1-runs.toml"
+    runs.write_text("[e1]\n" + "".join(f'seed{s} = "results/runs/e1-{s}"\n' for s in cs.SEEDS))
+    return [x for d in dirs for x in ("--eval", str(d))] + ["--out", str(out), "--runs", str(runs)]
 
 
 # covers: AC-30
@@ -1245,6 +1689,29 @@ def test_rq1_needs_the_three_finished_test_evals(tmp_path, capsys, change, messa
     assert rq1.main(rq1_args(dirs, out)) == 1
     assert message in capsys.readouterr().out
     assert not out.exists()
+
+
+# review finding 8: the eval of another arm at the same seed must not pass as E1
+def test_rq1_refuses_an_eval_that_is_not_e1(tmp_path, capsys):
+    dirs = [write_verdict(tmp_path, 42, H1), write_verdict(tmp_path, 43, H1, source_run_id="e3-43"),
+            write_verdict(tmp_path, 44, H1)]
+    out = tmp_path / "rq1.txt"
+    assert rq1.main(rq1_args(dirs, out)) == 1
+    assert "run e3-43 is not the E1 run of seed 43" in capsys.readouterr().out
+    assert not out.exists()
+
+
+def test_rq1_refuses_evals_of_two_protocols(tmp_path, capsys):
+    dirs = [write_verdict(tmp_path, 42, H1), write_verdict(tmp_path, 43, H1, protocol_hash="q"),
+            write_verdict(tmp_path, 44, H1)]
+    assert rq1.main(rq1_args(dirs, tmp_path / "rq1.txt")) == 1
+    assert "differ in protocol_hash" in capsys.readouterr().out
+
+
+def test_rq1_refuses_a_missing_manifest(tmp_path, capsys):
+    dirs = [write_verdict(tmp_path, s, H1) for s in cs.SEEDS]
+    assert rq1.main([*rq1_args(dirs, tmp_path / "rq1.txt"), "--runs", str(tmp_path / "gone")]) == 1
+    assert "missing" in capsys.readouterr().out
 
 
 def test_rq1_refuses_a_missing_verdict_and_a_broken_line(tmp_path, capsys):
@@ -1542,6 +2009,17 @@ def test_the_records_name_the_new_dataset_and_not_the_old_one():
     assert "muhammadnomanned/brats-confirmation-test" in adr
     assert "muhammadnomanned/brats-joint-test" not in data + adr
     assert "brats-confirmation-test" in KAGGLE
+
+
+# covers: AC-25, the review fixes in the human steps
+def test_the_steps_commit_before_the_val_compare_and_carry_both_records():
+    assert KAGGLE.index("Commit before the val compare") < KAGGLE.index(
+        "compare_seeds.py --runs $RUNS --fold val")
+    assert "shows nothing tracked" not in KAGGLE and "prints nothing at all" in KAGGLE
+    assert "compare-val/preflight.json $STAGE/compare-val/" in KAGGLE
+    assert "{WORK}/compare-val/preflight.json results/0007-confirmation/compare-val/" in KAGGLE
+    assert KAGGLE.index("### The preflight") < KAGGLE.index("### The upload")
+    assert "writes nothing" not in KAGGLE and "nothing written" not in KAGGLE
 
 
 def test_e3b_is_mapped_to_its_folder():

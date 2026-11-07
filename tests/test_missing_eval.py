@@ -11,10 +11,12 @@ from pathlib import Path
 
 import pytest
 import torch
+from common.cache import sha256_file
 from common.data import MODALITIES, REGION_LABELS, REGIONS
 from common.evaluation import (
     EVAL_RUN_KEYS,
     METRIC_COLUMNS,
+    PREFLIGHT,
     PREREG_TAG,
     PROTOCOL_FILES,
     PROTOCOL_SOURCES,
@@ -1243,11 +1245,13 @@ def run_test(run, out, *extra):
 
 def open_rules(monkeypatch, root):
     """A clean git_info, and the rules of spec 0006 pointed at the files in root, all open. A test
-    below closes one."""
+    below closes one. The real seal is proven on a real repo in test_confirmation_compare.py."""
     monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
     monkeypatch.setattr("common.evaluation.GATE_FILE", root / "test-gate.md")
     monkeypatch.setattr("common.evaluation.COMPARE_VAL", root / "compare-val")
     monkeypatch.setattr("common.evaluation.descends_from_tag", lambda *a: True)
+    monkeypatch.setattr("common.evaluation.seal_problems", lambda commit: [])
+    monkeypatch.setattr("common.evaluation.compare_hash", lambda: "sealed")
 
 
 @pytest.fixture
@@ -1262,7 +1266,11 @@ def gate(val_eval, e1_run, tmp_path, monkeypatch):
     compare = tmp_path / "compare-val"
     compare.mkdir()
     run_id = load_run(run)["run_id"]
-    (compare / "run.json").write_text(json.dumps({"status": "ok", "run_ids": {"e1": run_id}}))
+    (compare / "run.json").write_text(json.dumps({
+        "status": "ok", "fold": "val", "prereg_tag": PREREG_TAG, "git_commit": "abc",
+        "git_dirty": False, "compare_hash": "sealed", "run_ids": {"e1": run_id},
+        "eval_sha256": {"e1": sha256_file(out / val_eval.name / "metrics.csv")}}))
+    (compare / PREFLIGHT).write_text(json.dumps({"status": "ok", "git_commit": "abc"}))
     open_rules(monkeypatch, tmp_path)
 
     def no_read(*a, **k):
@@ -1341,9 +1349,123 @@ def test_gate_refuses_a_val_compare_that_did_not_finish(gate, capsys, tmp_path):
 
 def test_gate_refuses_a_run_missing_from_the_val_compare(gate, capsys, tmp_path):
     out, _, run, _ = gate
-    (tmp_path / "compare-val" / "run.json").write_text(
-        json.dumps({"status": "ok", "run_ids": {"e1_seed42": "another"}}))
+    edit_record(tmp_path, run_ids={"e1_seed42": "another"})
     assert_refused(run, out, "val compare does not list run", capsys, "--open-test")
+
+
+def edit_record(tmp_path, name="run.json", drop=(), **fields):
+    path = tmp_path / "compare-val" / name
+    rec = {k: v for k, v in json.loads(path.read_text()).items() if k not in drop}
+    path.write_text(json.dumps(rec | fields))
+
+
+# covers: spec 0006, AC-33, the seal runs on Kaggle before any case is read
+def test_gate_runs_the_seal_on_this_commit(gate, capsys):
+    out, _, run, monkeypatch = gate
+    monkeypatch.setattr("common.evaluation.seal_problems",
+                        lambda commit: [f"commit {commit}: a sealed file differs"])
+    assert_refused(run, out, "commit abc: a sealed file differs", capsys, "--open-test")
+
+
+def test_gate_refuses_a_sealed_file_moved_since_the_val_compare(gate, capsys):
+    out, _, run, monkeypatch = gate
+    monkeypatch.setattr("common.evaluation.compare_hash", lambda: "moved")
+    assert_refused(run, out, "compare_hash differs", capsys, "--open-test")
+
+
+# covers: spec 0006, AC-35, the record is checked in full
+@pytest.mark.parametrize(("fields", "message"), [
+    ({"fold": "test"}, "val compare: fold is 'test'"),
+    ({"prereg_tag": "prereg-v0"}, "val compare: prereg_tag is 'prereg-v0'"),
+    ({"git_dirty": True}, "val compare: git_dirty is True"),
+    ({"git_dirty": None}, "val compare: git_dirty is None"),
+])
+def test_gate_refuses_a_val_compare_record(gate, capsys, tmp_path, fields, message):
+    out, _, run, _ = gate
+    edit_record(tmp_path, **fields)
+    assert_refused(run, out, message, capsys, "--open-test")
+
+
+def test_gate_refuses_a_val_compare_outside_the_tag(gate, capsys, monkeypatch):
+    out, _, run, _ = gate
+    monkeypatch.setattr("common.evaluation.descends_from_tag", lambda commit, *a: commit != "abc")
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("xyz", False))
+    assert_refused(run, out, "val compare: commit abc does not descend", capsys, "--open-test")
+
+
+def test_gate_refuses_a_record_with_no_hash_of_this_run(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    edit_record(tmp_path, drop=("eval_sha256",))
+    assert_refused(run, out, "no eval_sha256 entry", capsys, "--open-test")
+
+
+def test_gate_refuses_a_val_metrics_changed_after_the_compare(gate, capsys):
+    out, val, run, _ = gate
+    with open(val / "metrics.csv", "a") as f:
+        f.write("\n")
+    assert_refused(run, out, "changed since the val compare", capsys, "--open-test")
+
+
+def test_gate_lists_a_val_metrics_gone_after_the_compare(gate, capsys):
+    out, val, run, _ = gate
+    (val / "metrics.csv").unlink()
+    assert_refused(run, out, "the val compare read it", capsys, "--open-test")
+
+
+# covers: spec 0006, AC-34, the commit tie
+def test_gate_refuses_no_preflight_record(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    (tmp_path / "compare-val" / PREFLIGHT).unlink()
+    assert_refused(run, out, "the preflight has not passed", capsys, "--open-test")
+
+
+def test_gate_refuses_a_preflight_of_another_commit(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    edit_record(tmp_path, PREFLIGHT, git_commit="other")
+    assert_refused(run, out, "preflight passed on other, this is abc", capsys, "--open-test")
+
+
+def test_gate_refuses_a_preflight_that_is_not_ok(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    edit_record(tmp_path, PREFLIGHT, status="failed")
+    assert_refused(run, out, "preflight: status is 'failed'", capsys, "--open-test")
+
+
+def test_gate_lists_every_site_rule_with_no_val_eval(gate, capsys, tmp_path):
+    out, val, run, _ = gate
+    (tmp_path / "compare-val" / PREFLIGHT).unlink()
+    (tmp_path / "compare-val" / "run.json").unlink()
+    shutil.rmtree(val)
+    assert run_test(run, out, "--open-test") == 2
+    text = capsys.readouterr().out
+    assert "test gate, nothing read" in text
+    for message in ("compare_seeds.py --fold val first", "finish the val eval first",
+                    "the preflight has not passed", "no val GPU to compare"):
+        assert message in text
+
+
+def test_the_site_rules_do_not_touch_a_val_sweep(val_eval, e1_run, tmp_path, monkeypatch):
+    monkeypatch.setattr(evaluate, "site_problems", lambda *a: ["must not run"])
+    assert check_eval.main([str(val_eval), "--run", str(e1_run)]) == 0
+    assert run_eval(e1_run, val_eval.parent, "--rerun-reason", "site rules") == 0
+
+
+# covers: spec 0006, AC-36. Each sweep below stops before a case is read
+def test_gate_refuses_a_cpu_sweep(gate, capsys):
+    out, val, run, _ = gate
+    edit_json(val, gpu="Tesla T4")
+    assert_refused(run, out, "gpu is None, the val eval used 'Tesla T4'", capsys, "--open-test")
+
+
+def test_gate_refuses_another_gpu(gate, capsys):
+    out, val, run, monkeypatch = gate
+    edit_json(val, gpu="Tesla T4")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda: "Tesla P100")
+    assert evaluate.main(["--run", str(run), "--fold", "test", "--out", str(out),
+                          "--open-test"]) == 2
+    assert "gpu is 'Tesla P100', the val eval used 'Tesla T4'" in capsys.readouterr().out
+    assert not list(out.glob("*-test*"))
 
 
 def test_gate_prints_a_failed_gate_with_no_val_eval(gate, capsys, tmp_path):
@@ -1575,6 +1697,18 @@ def test_rules_refuse_a_test_eval_that_scored_no_case(gate, e1_run, tmp_path):
     (folder / "metrics.csv").write_text(",".join(METRIC_COLUMNS) + "\n")
     edit_json(folder, n_cases=0)
     assert check_rules(folder, run) == ["case set differs from the test fold: 2 missing, 0 extra"]
+
+
+# covers: spec 0006, AC-36. check_rules also sees a finished test eval from another GPU
+def test_rules_refuse_a_test_eval_from_another_gpu(gate, e1_run, tmp_path):
+    out, _, run, monkeypatch = gate
+    monkeypatch.undo()
+    open_rules(monkeypatch, tmp_path)
+    assert run_test(run, out, "--open-test") == 0
+    folder = out / f"{e1_run.name}-test"
+    assert check_rules(folder, run) == []
+    edit_json(folder, gpu="Tesla P100")
+    assert check_rules(folder, run) == ["gpu differs from the val eval's"]
 
 
 # covers: AC-16. The projection is for a val eval; a finished test eval has nothing to project.

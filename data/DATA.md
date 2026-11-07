@@ -50,8 +50,8 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 
 ## Confirmation test inputs on Kaggle (for the one test opening of the 12 models, ADR 0002)
 
-- **Where.** Private Kaggle dataset `muhammadnomanned/brats-confirmation-test` (spec 0006, AC-25). Not uploaded yet: it can only be built after the 12 val evals and the val compare. The steps are in `experiments/0007-confirmation/KAGGLE.md`, step 5. Never make it public. Record here the byte count, and that `isPrivate` is true, once it is up. It replaces `brats-joint-test`, which was never uploaded.
-- **What.** One file, `confirmation-test.tar.bin`: an uncompressed tar of `runs/<run id>/` (`config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` for each of the 12 models), `evals/<run id>-val/` for each of the 12, and `compare-val/run.json`. The notebook unpacks it into `/kaggle/working/confirmation/`, because `/kaggle/input` is read only and the sweep writes beside the val eval.
+- **Where.** Private Kaggle dataset `muhammadnomanned/brats-confirmation-test` (spec 0006, AC-25). Not uploaded yet: it can only be built after the 12 val evals, the val compare and the preflight. The steps are in `experiments/0007-confirmation/KAGGLE.md`, step 5. Never make it public. Record here the byte count, and that `isPrivate` is true, once it is up. It replaces `brats-joint-test`, which was never uploaded.
+- **What.** One file, `confirmation-test.tar.bin`: an uncompressed tar of `runs/<run id>/` (`config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` for each of the 12 models), `evals/<run id>-val/` for each of the 12, `compare-val/run.json` and `compare-val/preflight.json`. The notebook unpacks it into `/kaggle/working/confirmation/`, because `/kaggle/input` is read only and the sweep writes beside the val eval.
 - **Why a tar.** The same reason as the two above. The test gate proves through `source_best_sha256` that each `best.pt` came through byte equal.
 - **What it holds.** Model weights, case IDs with their scores, and no images. The BraTS terms still to confirm above apply here too.
 

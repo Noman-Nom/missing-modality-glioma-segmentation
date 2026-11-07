@@ -7,6 +7,7 @@ rule, resume, the test gate and check_rules live here too (AC-5, AC-6, AC-7, AC-
 import csv
 import hashlib
 import inspect
+import json
 import math
 import os
 import statistics
@@ -45,6 +46,13 @@ PROTOCOL_FILES = (
     "experiments/common/missing.py", "experiments/common/stats.py",
 )
 PROTOCOL_SOURCES = (predict, cached_items, cached_eval_transforms, CachedCase, label_to_regions)
+# what a compare depends on, after PROTOCOL_FILES: no file here may move after the tag (spec 0006,
+# AC-28, AC-33). This file holds the list, so the gate on Kaggle can run the seal
+SEALED_FILES = (*PROTOCOL_FILES, "experiments/common/strategies.py", "experiments/common/model.py",
+                "experiments/0004-missing-eval/evaluate.py",
+                "experiments/0007-confirmation/compare_seeds.py", "experiments/common/runlog.py",
+                "experiments/common/cache.py", "experiments/common/data.py",
+                "experiments/0007-confirmation/rq1_seeds.py")
 METRIC_COLUMNS = ["eval_id", "case", "subject", "pattern_id", "pattern_name", "region", "dice",
                   "hd95_mm", "sensitivity", "precision", "gt_empty", "pred_empty", "pred_ml",
                   "true_ml"]
@@ -59,9 +67,10 @@ EVAL_RUN_KEYS = (
 # a resume stops if any of these differs from run.json (AC-5); paths are not here, Kaggle moves them
 RESUME_KEYS = ("git_commit", "config_hash", "protocol_hash", "source_run_id",
                "source_config_hash", "source_best_iteration", "source_best_sha256", "device", "gpu")
-# a test eval must hold the same value as its val eval on each of these (AC-7, AC-16)
+# a test eval must hold the same value as its val eval on each of these (AC-7, AC-16), gpu too
+# (spec 0006, AC-36)
 VAL_MATCH_KEYS = ("protocol_hash", "config_hash", "source_best_iteration", "source_best_sha256",
-                  "splits_sha256")
+                  "splits_sha256", "gpu")
 PREREG_TAG = "prereg-v1"  # the current protocol tag, moved only by spec 0006, AC-31
 # the human's literature check, one `key: value` line each, as a path inside the repo (AC-19)
 LITERATURE_GATE = "docs/literature/test-gate.md"
@@ -69,6 +78,7 @@ GATE_FILE = REPO / LITERATURE_GATE
 GATE_KEYS = ("status", "date", "papers_read", "cai_status", "citation_search")
 MIN_PAPERS_READ = 50
 COMPARE_VAL = REPO / "results" / "0007-confirmation" / "compare-val"  # spec 0006, AC-27
+PREFLIGHT = "preflight.json"  # written beside the val compare record when the preflight passes
 MAX_MEAN_DICE_DIFF = 0.001  # AC-9, per region
 MAX_CASE_DICE_DIFF = 0.01  # AC-9, per (case, region)
 
@@ -123,6 +133,14 @@ def protocol_hash():
     for source in PROTOCOL_SOURCES:
         h.update(inspect.getsource(source).encode("utf-8"))
     h.update(repr((MODALITIES, REGIONS, REGION_LABELS)).encode("utf-8"))
+    return h.hexdigest()
+
+
+def compare_hash():
+    """sha256 over the bytes of SEALED_FILES, in that order (spec 0006, AC-28)."""
+    h = hashlib.sha256()
+    for name in SEALED_FILES:
+        h.update((REPO / name).read_bytes())
     return h.hexdigest()
 
 
@@ -346,28 +364,103 @@ def gate_problems(text):
     return errors
 
 
-def descends_from_tag(commit, tag, repo):
-    """True if commit holds the tag. An unknown tag or an unknown commit gives False."""
-    r = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", f"refs/tags/{tag}",
+def is_ancestor(older, commit, repo):
+    """True if commit holds older. A name git does not know gives False."""
+    r = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", str(older),
                         str(commit)], capture_output=True, check=False)
     return r.returncode == 0
 
 
-def opening_problems(run_id, commit):
-    """The rules of the one test opening (spec 0006, AC-27), as error strings: the literature
-    gate passes, the protocol tag is an ancestor of this commit, and the val compare finished and
-    lists this run. Reads no case."""
+def descends_from_tag(commit, tag, repo):
+    """True if commit holds the tag. An unknown tag or an unknown commit gives False."""
+    return is_ancestor(f"refs/tags/{tag}", commit, repo)
+
+
+def seal_problems(commit):
+    """AC-28 for one commit: no sealed file differs from the tag, and its literature gate passes.
+    Asks git about that commit, so an edit in the tree or a rewrite after the opening changes
+    nothing here."""
+    diff = subprocess.run(["git", "-C", str(REPO), "diff", "--quiet", f"refs/tags/{PREREG_TAG}",
+                           str(commit), "--", *SEALED_FILES], capture_output=True, check=False)
+    errors = [f"commit {commit}: a sealed file differs from {PREREG_TAG}"] if diff.returncode else []
+    gate = subprocess.run(["git", "-C", str(REPO), "show", f"{commit}:{LITERATURE_GATE}"],
+                          capture_output=True, encoding="utf-8", check=False)
+    if gate.returncode:
+        return errors + [f"commit {commit}: it holds no {LITERATURE_GATE}"]
+    return errors + [f"commit {commit}: {e}" for e in gate_problems(gate.stdout)]
+
+
+def val_record_problems(rec):
+    """AC-35: the val compare record is a clean, finished val compare under this tag, of the
+    sealed files as they are now. rec is its run.json. Returns error strings."""
+    errors = []
+    if rec.get("status") != "ok":
+        errors.append(f"val compare: status is {rec.get('status')!r}, not 'ok'")
+    if rec.get("fold") != "val":
+        errors.append(f"val compare: fold is {rec.get('fold')!r}, not 'val'")
+    if rec.get("prereg_tag") != PREREG_TAG:
+        errors.append(f"val compare: prereg_tag is {rec.get('prereg_tag')!r}, not {PREREG_TAG!r}")
+    if rec.get("git_dirty") is not False:
+        errors.append(f"val compare: git_dirty is {rec.get('git_dirty')!r}, must be False")
+    if not descends_from_tag(rec.get("git_commit"), PREREG_TAG, REPO):
+        errors.append(f"val compare: commit {rec.get('git_commit')} does not descend from "
+                      f"{PREREG_TAG}")
+    if rec.get("compare_hash") != compare_hash():
+        errors.append("compare_hash differs from the val compare's: a sealed file moved")
+    return errors
+
+
+def val_file_problems(path, want):
+    """AC-35: path is a val metrics.csv and want its entry in eval_sha256. A missing file is a
+    listed error, never a traceback, because this runs before the val eval is checked."""
+    if not want:
+        return [f"val compare: no eval_sha256 entry for {path}"]
+    if not Path(path).is_file():
+        return [f"{path} missing, the val compare read it"]
+    return [] if sha256_file(path) == want else [f"{path} changed since the val compare"]
+
+
+def opening_problems(run_id, commit, val_dir):
+    """The rules of the one test opening (spec 0006, AC-27, AC-33, AC-35), as error strings: the
+    literature gate passes, the protocol tag is an ancestor of this commit, no sealed file moved,
+    and the val compare is whole, lists this run, and read the val metrics.csv now in val_dir.
+    Reads no case."""
     errors = (gate_problems(GATE_FILE.read_text(encoding="utf-8")) if GATE_FILE.is_file()
               else [f"{GATE_FILE} missing: the literature gate has not passed"])
     if not descends_from_tag(commit, PREREG_TAG, REPO):
         errors.append(f"commit {commit} does not descend from {PREREG_TAG}")
+    errors += seal_problems(commit)
     if not (COMPARE_VAL / "run.json").is_file():
         return errors + [f"{COMPARE_VAL} missing: run compare_seeds.py --fold val first"]
     compare = load_run(COMPARE_VAL)
-    if compare.get("status") != "ok":
-        errors.append(f"val compare: status is {compare.get('status')!r}, not 'ok'")
-    if run_id not in compare.get("run_ids", {}).values():
-        errors.append(f"val compare does not list run {run_id}")
+    errors += val_record_problems(compare)
+    slots = {run: slot for slot, run in compare.get("run_ids", {}).items()}
+    if run_id not in slots:
+        return errors + [f"val compare does not list run {run_id}"]
+    return errors + val_file_problems(Path(val_dir) / "metrics.csv",
+                                      compare.get("eval_sha256", {}).get(slots[run_id]))
+
+
+def site_problems(val_dir, commit, gpu):
+    """The rules that can only be checked where the sweep runs (spec 0006, AC-34, AC-36): this is
+    the commit that passed the preflight, on the GPU of the val eval. evaluate.py calls this for
+    --fold test beside check_test_gate. The preflight does not, because its own record does not
+    exist yet and the laptop GPU is not the Kaggle one. Every missing file is a listed error."""
+    errors = []
+    path = COMPARE_VAL / PREFLIGHT
+    if not path.is_file():
+        errors.append(f"{path} missing: the preflight has not passed, or its record is not here")
+    else:
+        rec = json.loads(path.read_text())
+        if rec.get("status") != "ok":
+            errors.append(f"preflight: status is {rec.get('status')!r}, not 'ok'")
+        if rec.get("git_commit") != commit:
+            errors.append(f"preflight passed on {rec.get('git_commit')}, this is {commit}")
+    if not (Path(val_dir) / "run.json").is_file():
+        return errors + [f"{val_dir} missing: no val GPU to compare"]
+    val_gpu = load_run(val_dir).get("gpu")
+    if gpu != val_gpu:
+        errors.append(f"gpu is {gpu!r}, the val eval used {val_gpu!r}")
     return errors
 
 
@@ -378,8 +471,8 @@ def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol
     of this run: protocol seals only the default config.toml, so --config needs its own check.
     source_pins() checks that the weights and the split file are still the ones val scored, and
     opening_problems() adds the rules of spec 0006. Every model passes through here, so the
-    preflight of compare_seeds.py runs these same rules. It reads no case. It stops accidents; it
-    is not proof of one opening.
+    preflight of compare_seeds.py runs these same rules, and only site_problems() is added on
+    Kaggle. It reads no case. It stops accidents; it is not proof of one opening.
     """
     if fold != "test":
         return ["--open-test is only for --fold test"] if open_test else []
@@ -392,8 +485,8 @@ def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol
         errors.append(f"git_dirty is {git[1]!r}, must be False: commit first")
     if rec["quick"] is not False:
         errors.append("the E1 run is a quick run")
-    errors += opening_problems(rec["run_id"], git[0])
     val_dir = Path(val_dir)
+    errors += opening_problems(rec["run_id"], git[0], val_dir)
     if not (val_dir / "run.json").is_file():
         return errors + [f"{val_dir} missing: finish the val eval first"]
     errors += [f"val eval: {e}" for e in check_rules(val_dir, run_dir)]

@@ -5,10 +5,11 @@ Run analyse.py on each eval first: this reads its verdict.txt and run.json, and 
 agree on a line when it has the same word, supported or not supported. The pattern lists and p
 values may differ. A line that splits means the H1 claim is not made. Writes one line per H1 line,
 in the order of verdict.txt. Exit 1, writing nothing, unless the evals are the finished test evals
-of seeds 42, 43 and 44. Uses no GPU.
+of the E1 runs of seeds 42, 43 and 44 in runs.toml, under one protocol_hash. Uses no GPU.
 """
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -31,9 +32,16 @@ def parse_verdict(text):
     return words
 
 
-def read_evals(eval_dirs):
+def e1_run_ids(path):
+    """{seed: E1 run id} from the manifest. Only an eval of one of these may count for RQ1."""
+    with open(path, "rb") as f:
+        e1 = tomllib.load(f).get("e1", {})
+    return {s: Path(e1.get(f"seed{s}", "")).name for s in SEEDS}
+
+
+def read_evals(eval_dirs, e1_ids):
     """Returns (errors, {seed: {line name: word}}), the second empty unless all could be read."""
-    errors, verdicts = [], {}
+    errors, verdicts, hashes = [], {}, set()
     for d in map(Path, eval_dirs):
         if not (d / "run.json").is_file() or not (d / "verdict.txt").is_file():
             errors.append(f"{d}: run.json or verdict.txt missing, run analyse.py first")
@@ -43,10 +51,16 @@ def read_evals(eval_dirs):
             errors.append(f"{d}: not a finished full eval")
         if rec.get("fold") != "test":
             errors.append(f"{d}: fold is {rec.get('fold')!r}, not 'test'")
+        if rec.get("source_run_id") != e1_ids.get(rec.get("source_seed")):
+            errors.append(f"{d}: run {rec.get('source_run_id')} is not the E1 run of seed "
+                          f"{rec.get('source_seed')} in the manifest")
+        hashes.add(rec.get("protocol_hash"))
         try:
             verdicts[rec.get("source_seed")] = parse_verdict((d / "verdict.txt").read_text())
         except ValueError as e:
             errors.append(f"{d}: {e}")
+    if len(hashes) > 1:
+        errors.append("the evals differ in protocol_hash")
     if sorted(verdicts, key=str) != sorted(SEEDS, key=str):
         errors.append(f"seeds are {sorted(verdicts, key=str)}, expected {list(SEEDS)}")
     elif any(list(v) != list(verdicts[SEEDS[0]]) for v in verdicts.values()):
@@ -70,9 +84,13 @@ def agreement(verdicts):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--eval", required=True, action="append", type=Path, dest="evals")
+    ap.add_argument("--runs", type=Path, default=REPO / "experiments/0007-confirmation/runs.toml")
     ap.add_argument("--out", type=Path, default=REPO / "results/0007-confirmation/rq1-test.txt")
     a = ap.parse_args(argv)
-    errors, verdicts = read_evals(a.evals)
+    if not a.runs.is_file():
+        print(f"ERROR: {a.runs} missing")
+        return 1
+    errors, verdicts = read_evals(a.evals, e1_run_ids(a.runs))
     if errors:
         for e in errors:
             print(f"ERROR: {e}")

@@ -29,6 +29,7 @@ from common.evaluation import (
     metrics_writer,
     prepare_folder,
     protocol_hash,
+    site_problems,
     source_pins,
     sweep,
 )
@@ -93,9 +94,14 @@ def main(argv=None):
     protocol = protocol_hash()
     eval_cfg = {**load_config(a.config)["eval"], "quick": a.quick}
     saved = {"eval": eval_cfg}
+    device = torch.device("cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu")
+    gpu = torch.cuda.get_device_name() if device.type == "cuda" else None
+    val_dir = a.out / f"{rec['run_id']}-val"
     # first, before any case list or .npz (AC-7)
-    errors = check_test_gate(a.fold, a.open_test, a.quick, rec, (commit, dirty),
-                             a.out / f"{rec['run_id']}-val", a.run, protocol, config_hash(saved))
+    errors = check_test_gate(a.fold, a.open_test, a.quick, rec, (commit, dirty), val_dir, a.run,
+                             protocol, config_hash(saved))
+    if a.fold == "test":  # spec 0006, AC-34, AC-36
+        errors += site_problems(val_dir, commit, gpu)
     if errors:
         print("ERROR: test gate, nothing read:\n" + "\n".join("  " + e for e in errors))
         return 2
@@ -128,7 +134,6 @@ def main(argv=None):
 
     eval_id = f"{rec['run_id']}-{a.fold}" + ("-quick" if a.quick else "")
     eval_dir = a.out / eval_id
-    device = torch.device("cuda" if a.device == "auto" and torch.cuda.is_available() else "cpu")
     fields = {
         "eval_id": eval_id, "quick": a.quick, "fold": a.fold, "n_cases": len(cases),
         "source_run": str(a.run), "source_run_id": rec["run_id"],
@@ -136,7 +141,7 @@ def main(argv=None):
         "protocol_hash": protocol, **source_pins(a.run, rec),
         "config_hash": config_hash(saved), "git_commit": commit, "git_dirty": dirty,
         "seed": eval_cfg["seed"], "device": device.type, "versions": versions(),
-        "gpu": torch.cuda.get_device_name() if device.type == "cuda" else None}
+        "gpu": gpu}
     reason = a.rerun_reason.strip()
     metrics = eval_dir / "metrics.csv"
     try:

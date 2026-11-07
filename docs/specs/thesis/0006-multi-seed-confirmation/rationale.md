@@ -64,6 +64,24 @@ E3b gets its own lines so that a secondary arm cannot weaken H2 or H3. Its verdi
 
 No published network arm: this study asks about training strategies, and a new network would break the rule that arms differ in one thing (basis: `AGENTS.md`, fair comparison). A public git tag with a GitHub Release gives an outside time stamp with no new service, so no ADR is needed. A tag alone is weaker, because its date is set by the client and a tag can be moved. An outside registry would be stronger, and the human can still add one later through an ADR.
 
+### Review fixes, 2026-11-07
+
+The review of `feat/confirmation-study` found no blocker, but four gaps in the rules (`docs/reviews/2026-11-07-feat-confirmation-study.md`, findings 2, 5, 6, 7). All four were settled before the tag. No E3 or E4 val eval had been read, and only seed 42 exists, so no multi seed number could have shaped these rules.
+
+**Seed rule.** Every test runs on subject values averaged over seeds, so n is the number of subjects, and the interval sees no variation between models (basis: AC-11). So one seed can carry a line. RQ1 already answers this with agree or split, and the human chose the same answer for H2, H3 and H4. A plain copy does not work for `equivalent`: with a true zero effect, seed signs are coin flips and agree only 1 time in 4, so a sign rule would make equivalence nearly unreachable. Equivalence claims closeness, so its seed check asks each seed to be close (basis: the logic of TOST). The no worse part of H4 uses the same idea, one sided. That count is `seeds_not_worse`, so a one sided check does not carry the name of a two sided one. The check only adds a condition, so it can only lower false claims (basis: intersection union test). Options weighed: report only, which leaves a `supported` line on one seed; falling back to the old words, which hides that the averaged test passed; a bootstrap over seeds, which means little with 3 seeds.
+
+**Commit tie.** The preflight and the Kaggle gate were not the same gate, and the only link between them was a human pasting 40 characters. The chosen record makes the link a check in code, at the one step that cannot be undone. Options weighed: printing the commit and comparing by hand, which stays a human step. The new test compare check also leaves proof afterwards that all 12 evals used the preflighted commit.
+
+**Keeping the preflight record after the opening.** AC-34 said a test eval on disk means the record must not move, and it guarded `--fold val` for that reason. But `--preflight` deleted the record as its first act, before any guard, so it broke the same rule. A preflight run after step 7 (say, to check something) would refuse, as it should, and the record would be gone. Then `--fold test` refuses with `the preflight did not pass`, and no new preflight can pass, so the final compare is blocked for good. The test `test_the_preflight_refuses_after_the_opening` pinned this by accident. Fixing it in place was chosen. Options weighed: never deleting the record, which is simpler, but a stale pass would then survive a later refusal on the same commit and the file would no longer mean the last preflight passed. Deleting only after the guards ran, which gives the same behaviour with more code. Dropping the record check from `--fold test`, which loses the proof that all 12 evals used the preflighted commit.
+
+The check on disk cannot see test folders that are still on Kaggle, between steps 6 and 7. A dirty laptop tree in that window makes a refused preflight delete the laptop copy, and a passing one on a new commit rewrites it. Step 7 now copies the record from the **Output**, because that copy is what the Kaggle gate read, so it is the honest one. Runner up: a marker file written at the opening, which the laptop would not see either.
+
+**Val compare record.** This record is the only link between the val compare and the opening. Asking for `git_dirty` false has a side effect found while tracing: `runs.toml` is filled in at step 4 and was only committed at step 5, so the normal path would have failed. The order of AC-20 now commits first.
+
+**GPU.** The opening is irreversible, so the check belongs before the read. The GPU name was only known after the gate, so `evaluate.py` works it out earlier.
+
+**Wider seal.** The cross check found that the gate leans on code nothing seals: the dirty check in `runlog.py`, the hash in `cache.py`, and `fold_cases` in `data.py`, which defines the test case set. `rq1_seeds.py` decides RQ1 claims and was also outside the seal. The human chose to add all four. Adding files moves only `compare_hash`, which is stored and not pinned.
+
 ## References
 
 **Project sources**:
