@@ -17,6 +17,7 @@ from common.evaluation import (
     eval_cases,
     metrics_writer,
     sweep,
+    volume_ml,
 )
 from common.metrics import HD95_EMPTY_MM
 from common.missing import PATTERNS
@@ -119,6 +120,31 @@ def test_sweep_order_rows_and_values(cached):
     assert tc["dice"] == pytest.approx(2 * 1 / (512 + 1))
     assert wt["sensitivity"] == 1.0 and wt["precision"] == pytest.approx(27 / 512)
     assert wt["gt_empty"] is False and wt["pred_empty"] is False
+
+
+# covers: spec 0006, AC-7. 1 mm voxels in this cache, so the volume is the voxel count / 1000.
+def test_sweep_gives_each_region_its_volume_as_a_python_float(cached):
+    cfg, _ = cached
+    got = []
+    sweep(Everywhere(), VAL, cfg, torch.device("cpu"), got.append)
+    wt, tc = got[0][:2]
+    assert (wt["pred_ml"], wt["true_ml"]) == pytest.approx((512 / 1000, 27 / 1000))
+    assert tc["true_ml"] == pytest.approx(1 / 1000)
+    assert type(wt["pred_ml"]) is float and type(wt["true_ml"]) is float
+
+
+def test_volume_uses_the_voxel_size():
+    mask = np.zeros((4, 4, 4), dtype=bool)
+    mask[:2, :3, :2] = True  # 12 voxels of 2 x 1 x 0.5 = 1 mm^3
+    assert volume_ml(mask, np.array([2.0, 1.0, 0.5], dtype=np.float32)) == 12 / 1000
+    assert volume_ml(~mask & False, (1.0, 1.0, 1.0)) == 0.0
+
+
+def test_new_columns_come_last_so_old_positions_hold():
+    assert METRIC_COLUMNS[-2:] == ["pred_ml", "true_ml"]
+    assert METRIC_COLUMNS[:-2] == ["eval_id", "case", "subject", "pattern_id", "pattern_name",
+                                   "region", "dice", "hd95_mm", "sensitivity", "precision",
+                                   "gt_empty", "pred_empty"]
 
 
 # covers: AC-3
@@ -264,7 +290,8 @@ def write_pairs(path, pairs, extra=b""):
         for case, p in pairs:
             write([{"case": case, "subject": "s", "pattern_id": p, "pattern_name": "n",
                     "region": g, "dice": 0.5, "hd95_mm": 1.0, "sensitivity": 0.5, "precision": 0.5,
-                    "gt_empty": False, "pred_empty": False} for g in REGIONS])
+                    "gt_empty": False, "pred_empty": False, "pred_ml": 1.0, "true_ml": 1.0}
+                   for g in REGIONS])
     with open(path, "ab") as f:
         f.write(extra)
     return path.read_bytes()

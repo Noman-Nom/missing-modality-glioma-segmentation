@@ -1,0 +1,20 @@
+% E3 and E4 preview stub (spec 0005, AC-19). Proves the three generated files build in XeLaTeX.
+% Run compare.py and make_table.py first, then: cd writing/tracer && latexmk -xelatex e3e4-preview.tex
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2cm]{geometry}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{booktabs}
+\usepackage{graphicx}
+
+\begin{document}
+
+\section*{E3 and E4 preview}
+
+This page only shows that the generated files build in the thesis toolchain.
+
+\input{../tables/0005-strategies-val-summary.tex}
+\input{../tables/0005-strategies-val-dice.tex}
+\input{../tables/0005-strategies-val-hd95.tex}
+
+\end{document}

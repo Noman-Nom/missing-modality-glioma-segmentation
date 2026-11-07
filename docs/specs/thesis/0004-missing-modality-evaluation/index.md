@@ -199,7 +199,7 @@ Holm is about 6 lines here. SciPy has no Holm function, and `statsmodels` is not
 - One `metrics.csv` comes from one `device` and one `gpu`, across every resume.
 - A table never comes from a folder that `analyse.py` would refuse today.
 - E2 keeps the `[preprocess]` settings of E1 unchanged, so the rebuilt cache has the same preprocess hash.
-- `0003-baseline/evaluate.py` stays unchanged and still reads no test case.
+- `0003-baseline/evaluate.py` stays unchanged and still reads no test case. *Note 2026-11-06 (spec 0005, AC-9): it now applies `strategy_hooks(cfg)["image_hook"]` after `apply_pattern()`, so the file did change. For E1 the hook changes nothing, and `metrics_val.csv` of a quick run stays byte equal. It still reads no test case, which is what this line was for.*
 
 ### Security model
 

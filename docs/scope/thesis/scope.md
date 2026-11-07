@@ -20,7 +20,8 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 4  | Preprocessing, label and channel mapping tests       | Slice 2    | in-progress |
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | done |
 | 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | done |
-| 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | planned |
+| 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | in-progress |
+| 14 | Confirmation study: 3 seeds, cost test, E3b, test    | Slice 4    | in-progress |
 | 8  | Reduced-label study (E5), optional                   | Slice 5    | planned |
 | 9  | Self-supervised pilot (E6), optional                 | Slice 5    | planned |
 | 10 | Cross-dataset evaluation (E7), only if independent   | Slice 5    | planned |
@@ -139,11 +140,39 @@ Code in `experiments/common/` (`evaluation.py`, `stats.py`), `experiments/0004-m
 
 ## Slice 4: Strategies
 
-### 7. Modality dropout (E3) and presence indicator (E4) · needs a decision · GA (planned)
-Compare simple robustness strategies against zero fill, on the same subjects, splits, metrics and seeds (RQ2).
+### 7. Modality dropout (E3) and presence indicator (E4) · GA (in-progress)
+Compare simple robustness strategies against zero fill, on the same subjects, splits, metrics and seeds (RQ2). Spec: [0005](../../specs/thesis/0005-modality-dropout-presence-indicator/index.md). Code in `experiments/common/strategies.py`, `experiments/0005-strategies/`.
 Done when: each strategy is trained and evaluated on all 15 patterns, any claimed benefit rests on a paired comparison, and the single joint test opening of E1, E3 and E4 has run (this feature owns it, through the sealed test path of E2).
 
-- [ ] Design it (spec): /architect modality dropout and presence indicator
+- [x] Design it (spec): /architect modality dropout and presence indicator
+- [ ] Build it: /develop E3 and E4 strategies
+  - [x] Strategies on the one path: hooks, `PresenceUNet`, `e3.toml`, `e4.toml`, the seal test (AC-1 to AC-11)
+  - [x] Comparison: `compare.py`, H2 verdict, tables (AC-15 to AC-19)
+  - [x] Checks and records: `check_strategy.py`, `KAGGLE.md`, ADR 0002, `data/DATA.md`, spec notes (AC-12, AC-14, AC-22, AC-23)
+  - [ ] Human run: E3 and E4 on the Kaggle T4, val evals, val comparison (AC-13)
+  - [ ] Human run: the joint test opening of E1, E3 and E4 (AC-20, AC-21)
+- [ ] Verify it: /check verify E3 and E4 strategies
+- [ ] Test it: /test E3 and E4 strategies
+- [x] Review it (fresh model): /check review E3 and E4 strategies
+- [ ] Document it: /document E3 and E4 strategies
+
+### 14. Confirmation study: 3 seeds, complete input cost test, E3b, sealed test opening · GA (in-progress)
+from spec 0006. Confirm the strategy comparison at full resolution on 3 seeds, test whether dropout costs accuracy on complete input, and open the test once for all 12 models (RQ1, RQ2). Takes over the joint test opening from feature 7. Spec: [0006](../../specs/thesis/0006-multi-seed-confirmation/index.md). Code in `experiments/0007-confirmation/`.
+Done when: `prereg-v1` is public, all 12 models pass their checks, the literature gate passes, and the single test opening has run with its verdict.
+
+- [x] Design it (spec): /architect confirmation study
+- [ ] Build it: /develop confirmation study
+  - [x] E3b arm and thin thread: draw, hook, config, seal of old draws, averaged H2 lines on toy folders (AC-2 to AC-4, AC-9 to AC-11, AC-13)
+  - [x] Cost test, exposure test, volume, rescore proof, outputs and tables (AC-7, AC-12, AC-14 to AC-18, AC-24, AC-26, AC-29)
+  - [x] Test path: gate at the opening, sealed files, amendment path, spec 0005 retired, RQ1 steps (AC-19 to AC-22, AC-27, AC-28, AC-30, AC-31)
+  - [x] Review fixes: seed rule with `split`, seal and commit tie at the opening, val compare record, GPU check, wider seal, repin (AC-10, AC-20, AC-24, AC-25, AC-27 to AC-29, AC-32 to AC-37)
+  - [x] Keep `preflight.json` once a test eval exists, and restore it at step 7 (AC-34)
+  - [ ] Checks and records, then the tag and Release (AC-1, AC-5, AC-6, AC-8, AC-23, AC-25)
+  - [ ] Human runs: 9 new trainings, 12 val evals, val compare, gate, test opening
+- [ ] Verify it: /check verify confirmation study
+- [x] Test it: /test confirmation study
+- [x] Review it (fresh model): /check review confirmation study
+- [ ] Document it: /document confirmation study
 
 ## Slice 5: Extensions (optional)
 

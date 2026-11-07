@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.cache import cache_dir, check_cache, preprocess_hash, read_cache_json, repo_path
 from common.data import fold_cases
 from common.runlog import config_hash, load_config, load_run
+from common.strategies import strategy_hooks
 from common.training import RUN_KEYS, check_config, make_run_dir, train
 
 HERE = Path(__file__).resolve().parent
@@ -127,7 +128,7 @@ def main(argv=None):
                   + "\n".join("  " + p for p in problems[:20]))
             return 2
         return train(cfg, a.resume, rec["run_id"], rec["train_cases"], rec["val_cases"],
-                     device=device, quick=rec["quick"], resume=True)
+                     device=device, quick=rec["quick"], resume=True, **strategy_hooks(cfg))
 
     cfg = effective_config(a.config or HERE / "config.toml", a.quick, a.seed)
     bad = check_config(cfg)
@@ -143,7 +144,8 @@ def main(argv=None):
 
     run_id, run_dir = make_run_dir(a.out or REPO / "results" / "0003-baseline",
                                    f"{datetime.now(UTC):%Y%m%d-%H%M%S}-{config_hash(cfg)[:8]}")
-    return train(cfg, run_dir, run_id, train_cases, val_cases, device=device, quick=a.quick)
+    return train(cfg, run_dir, run_id, train_cases, val_cases, device=device, quick=a.quick,
+                 **strategy_hooks(cfg))
 
 
 if __name__ == "__main__":
