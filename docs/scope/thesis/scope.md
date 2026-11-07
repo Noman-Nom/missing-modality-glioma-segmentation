@@ -167,7 +167,7 @@ Done when: `prereg-v1` is public, all 12 models pass their checks, the literatur
   - [x] Test path: gate at the opening, sealed files, amendment path, spec 0005 retired, RQ1 steps (AC-19 to AC-22, AC-27, AC-28, AC-30, AC-31)
   - [x] Review fixes: seed rule with `split`, seal and commit tie at the opening, val compare record, GPU check, wider seal, repin (AC-10, AC-20, AC-24, AC-25, AC-27 to AC-29, AC-32 to AC-37)
   - [x] Keep `preflight.json` once a test eval exists, and restore it at step 7 (AC-34)
-  - [ ] Checks and records, then the tag and Release (AC-1, AC-5, AC-6, AC-8, AC-23, AC-25)
+  - [x] Checks and records, then the tag and Release (AC-1, AC-5, AC-6, AC-8, AC-23, AC-25)
   - [ ] Human runs: 9 new trainings, 12 val evals, val compare, gate, test opening
 - [ ] Verify it: /check verify confirmation study
 - [x] Test it: /test confirmation study
