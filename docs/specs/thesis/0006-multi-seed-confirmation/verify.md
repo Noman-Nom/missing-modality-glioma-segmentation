@@ -1,5 +1,5 @@
 # Verify: confirmation study · spec 0006 · updated 2026-11-07
-_Steps derived from spec 0006 acceptance criteria. `/check verify` runs these; `/test` locks the durable ones. This file covers milestones 1 to 3. Later milestones add to it._
+_Steps derived from spec 0006 acceptance criteria. `/check verify` runs these; `/test` locks the durable ones. This file covers milestones 1 to 4. The human runs add to it._
 
 ## Commands
 - [ ] `uv run pytest -q tests/test_common_strategies.py tests/test_confirmation_compare.py tests/test_strategy_runs.py tests/test_experiment_scripts.py` → all pass → AC-2, AC-3, AC-4, AC-9, AC-10, AC-11, AC-13
@@ -60,5 +60,23 @@ Toy folders and a toy git repo, until the human runs. No test case exists in any
 - [ ] Margin: a changed `EQUIV_MARGIN` changes `compare_hash`, so `--fold test` refuses → AC-14, AC-28
 - [ ] H1 agreement: 3 seeds with `not supported` and different pattern lists → `agree`; 2 against 1 → `split, claim not made` → AC-30
 
+## Milestone 4 (added 2026-11-07)
+Toy folders and a toy git repo, until the human runs. No test case exists in any of these steps.
+- [ ] `uv run pytest -q` → all pass, 811 plus the new check and records tests → AC-23
+- [ ] `uv run ruff check .` → clean → AC-23
+- [ ] `check_confirmation.py --runs experiments/0007-confirmation/runs.toml` today → exit 1, three `AC-26 <arm>: FAIL` lines, nine `no entry` lines, three `metrics.csv missing` lines → AC-1, AC-9, AC-26
+- [ ] `grep -c 'brats-joint-test' data/DATA.md docs/architecture/decisions/0002-kaggle-t4-training.md` → 1 in `data/DATA.md` (the line saying it was replaced), 0 in the ADR → AC-25
+- [ ] Read `0007-confirmation/KAGGLE.md` from top to bottom as the person who will run it → every step is there, in the order of AC-20, nothing assumes this chat → AC-20, AC-25
+- [ ] After step 2 of `KAGGLE.md`, on the real rescored evals → three `AC-26 <arm>: ok` lines → AC-7, AC-26
+- [ ] After step 4, on all 12 → `PASS` → AC-1, AC-2, AC-5, AC-9, AC-23
+- [ ] Human: `git tag -n99 prereg-v1` holds every fact of AC-8 plus the E4 score 0.8711, and the Release shows on GitHub → AC-8
+
+## Value sourcing, milestone 4
+- [ ] Kept run ids: `KEPT` in `check_confirmation.py` against the `run.json` of each folder, and an entry pointing elsewhere → `must stay at` → AC-5
+- [ ] Pinned commit: read from the 9 new `run.json` files, never typed in. Two commits, or a dirty run → fails. A commit before the tag → fails → AC-5
+- [ ] Lock commit: `LOCK_COMMIT` is `5ce3d3b`; a changed `uv.lock` or an unknown commit → fails → AC-23
+- [ ] 4 input channels: `n_params` of each E3b run against the E1 of its seed. The real values are 12,870,506 for E1 and E3 and 12,877,418 for E4, so the rule tells them apart → AC-2
+- [ ] Session limit: the batch `SIZE` in step 6 comes from ADR 0002, which does not hold it yet → AC-25
+
 ## Not covered yet
-AC-1, AC-5, AC-6, AC-8, AC-23 (the check command), AC-25: milestone 4 and the human steps. AC-22 needs the real opening. `0007-confirmation/KAGGLE.md` holds only the test path half so far.
+AC-8 needs the human tag. AC-22 needs the real opening. AC-1, AC-5 and AC-6 are proven on toys only until the 9 runs exist.

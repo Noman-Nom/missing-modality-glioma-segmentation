@@ -48,10 +48,10 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 - **Why a tar.** It keeps the `checkpoints/` folder, and stops Kaggle from touching the files on upload, the same reason as the BraTS tar above.
 - **What it holds.** Model weights and case IDs with their scores, no images. The weights were trained on BraTS data, so the BraTS terms still to confirm above apply here too.
 
-## Joint test inputs on Kaggle (for the E1, E3 and E4 test opening, ADR 0002)
+## Confirmation test inputs on Kaggle (for the one test opening of the 12 models, ADR 0002)
 
-- **Where.** Private Kaggle dataset `muhammadnomanned/brats-joint-test`. Not uploaded yet: it can only be built after the E3 and E4 val evals. The steps are in `experiments/0005-strategies/KAGGLE.md`, step 6. Never make it public. Record here the byte count, and that `isPrivate` is true, once it is up.
-- **What.** One file, `joint-test.tar.bin`: an uncompressed tar of `runs/<run id>/` (`config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` for each of E1, E3 and E4), `evals-e1/<E1 run id>-val/` and `evals/<E3 and E4 run id>-val/`. The notebook unpacks it into `/kaggle/working/joint/`, because `/kaggle/input` is read only and the sweep writes beside the val eval.
+- **Where.** Private Kaggle dataset `muhammadnomanned/brats-confirmation-test` (spec 0006, AC-25). Not uploaded yet: it can only be built after the 12 val evals and the val compare. The steps are in `experiments/0007-confirmation/KAGGLE.md`, step 5. Never make it public. Record here the byte count, and that `isPrivate` is true, once it is up. It replaces `brats-joint-test`, which was never uploaded.
+- **What.** One file, `confirmation-test.tar.bin`: an uncompressed tar of `runs/<run id>/` (`config.toml`, `run.json`, `metrics_val.csv` and `checkpoints/best.pt` for each of the 12 models), `evals/<run id>-val/` for each of the 12, and `compare-val/run.json`. The notebook unpacks it into `/kaggle/working/confirmation/`, because `/kaggle/input` is read only and the sweep writes beside the val eval.
 - **Why a tar.** The same reason as the two above. The test gate proves through `source_best_sha256` that each `best.pt` came through byte equal.
 - **What it holds.** Model weights, case IDs with their scores, and no images. The BraTS terms still to confirm above apply here too.
 

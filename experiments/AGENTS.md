@@ -47,6 +47,7 @@ Folder numbers are build order. E numbers (E0 to E7, defined in `context/project
 | E2 | Missing modality evaluation | `0004-missing-eval` |
 | E3 | Modality dropout | `0005-strategies` |
 | E4 | Modality dropout plus presence indicator | `0005-strategies` |
+| E3b | Exposure: half of training on complete input, on the E3 base | `0007-confirmation` |
 | E5 to E7 | Extensions | folder added here when built |
 | none | Infrastructure: subject level split | `0001-splits` |
 | none | Infrastructure: tracer bullet | `0002-tracer-bullet` |

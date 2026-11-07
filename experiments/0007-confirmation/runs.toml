@@ -1,7 +1,8 @@
 # The run manifest of the confirmation study (spec 0006, AC-9). One path under results/ per
 # (arm, seed), 12 in all. You fill it in, because run ids hold a time stamp. Seed 42 runs stay in
 # their own folders; new runs go to results/0007-confirmation/runs/. An empty path is a missing
-# entry, and compare_seeds.py refuses it. A replaced run stays under [replaced] with its reason.
+# entry, and compare_seeds.py refuses it. A replaced run stays under [replaced] with its reason, as
+# <run id> = "<arm> seed<N>: <reason>", for example e3 seed43, at most 2 per slot (AC-6).
 [e1]
 seed42 = "results/0003-baseline/20261103-023817-f9b3afb6"
 seed43 = ""
@@ -13,7 +14,7 @@ seed43 = ""
 seed44 = ""
 
 [e4]
-seed42 = ""
+seed42 = "results/0005-strategies/runs/20261106-235247-8999a39e"
 seed43 = ""
 seed44 = ""
 

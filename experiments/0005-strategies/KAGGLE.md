@@ -1,7 +1,7 @@
 ```bash
 R1="20261103-023817-f9b3afb6"
 R3="20261106-024450-10cfa2cc"
-R4="fill in after step 2"
+R4="20261106-235247-8999a39e"
 ```
 
 These three lines hold the run ids of E1, E3 and E4. `train.py` prints each id in its `run dir <path>` line. The id holds a time stamp, so nobody can know R3 and R4 in advance. Fill them in here as the runs finish. The lines work as they are in a shell and in a notebook cell.
@@ -158,6 +158,8 @@ for R in $R3 $R4; do
   uv run python experiments/0004-missing-eval/check_eval.py results/0005-strategies/evals/$R-val --run results/0005-strategies/runs/$R
 done
 ```
+
+Note (2026-11-07): the current `check_eval.py` now fails these two eval folders with `no pred_ml or true_ml`, by design, because the volume columns came later (spec 0006, AC-7). Their step 3 check was run with the `check_eval.py` from their own commit, `db5d56f`, and passed.
 
 `--run` is needed here because the folder moved between machines. `check_baseline.py` is not repeated, because it reads the cache, which stayed on Kaggle.
 

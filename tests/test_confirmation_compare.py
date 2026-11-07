@@ -8,6 +8,7 @@ import importlib.util
 import json
 import math
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -492,6 +493,7 @@ def test_the_real_manifest_lists_every_slot_and_the_kept_seed_42_paths():
     assert all("no entry" in e for e in errors)
     assert dirs["e1", 42].name == "20261103-023817-f9b3afb6"
     assert dirs["e3", 42].name == "20261106-024450-10cfa2cc"
+    assert dirs["e4", 42].name == "20261106-235247-8999a39e"
     assert len(errors) + len(dirs) == 12
 
 
@@ -1261,3 +1263,287 @@ def test_rq1_refuses_verdicts_with_different_lines(tmp_path, capsys):
             write_verdict(tmp_path, 44, H1[:1])]
     assert rq1.main(rq1_args(dirs, tmp_path / "rq1.txt")) == 1
     assert "different H1 lines" in capsys.readouterr().out
+
+
+# ---- check_confirmation.py (AC-1, AC-2, AC-5 to AC-7, AC-9, AC-23, AC-25, AC-26) ----
+
+KEPT_SLOTS = [("e1", 42), ("e3", 42), ("e4", 42)]
+NEW_SLOT = ("e3", 43)
+
+
+class Study:
+    """The toy world as a finished study: the 3 kept runs from an old commit, 9 new runs and all 12
+    evals from `after`, and old evals with the same scores."""
+
+    def __init__(self, world, before, after):
+        self.world, self.before, self.after = world, before, after
+        self.audit = world.root / "audit.csv"
+        pd.DataFrame({"case": VAL, "ml_WT": [true_ml(c) for c in VAL]}).to_csv(self.audit,
+                                                                              index=False)
+        self.kept = {}
+        for arm, seed in KEPT_SLOTS:
+            old = f"old/{arm}"
+            shutil.copytree(world.eval_dir((arm, seed)), world.root / old)
+            self.kept[arm] = (world.paths[arm, seed], old)
+        for s in cs.slots():
+            commit = before if s in KEPT_SLOTS else after
+            world.edit(world.run_dir(s) / "run.json", git_commit=commit, git_dirty=False,
+                       n_params=9)
+            world.edit(world.eval_dir(s) / "run.json", git_dirty=False)
+
+    def run(self):
+        w = self.world
+        return check.main(["--runs", str(w.manifest), "--evals", str(w.evals), "--root",
+                           str(w.root), "--splits", str(self.audit)])
+
+    def fails(self, capsys, message):
+        assert self.run() == 1
+        out = capsys.readouterr().out
+        assert message in out
+        assert "PASS" not in out
+
+
+@pytest.fixture
+def study(world, tagged_repo, monkeypatch):
+    repo, before, after, *_ = tagged_repo
+    monkeypatch.setattr(check, "REPO", repo)
+    monkeypatch.setattr(check, "LOCK_COMMIT", before)
+    monkeypatch.setattr(check, "NEW_RUNS", "results/runs")
+    s = Study(world, before, after)
+    monkeypatch.setattr(check, "KEPT", s.kept)
+    return s
+
+
+def test_a_finished_study_passes(study, capsys):
+    assert study.run() == 0
+    out = capsys.readouterr().out
+    assert out.count(": ok") == 3
+    assert "PASS" in out
+
+
+# covers: AC-5. The kept runs come from an older commit, and only the 9 new runs must share one.
+def test_only_the_9_new_runs_must_share_a_commit(study, capsys):
+    assert study.world.run_dir(("e1", 42)).joinpath("run.json").read_text().count(study.before)
+    assert study.run() == 0
+
+
+def test_a_kept_run_in_another_folder_fails(study, capsys):
+    w = study.world
+    s = ("e1", 42)
+    moved = "results/moved/e1-42"
+    shutil.copytree(w.run_dir(s), w.root / moved)
+    w.paths[s] = moved
+    w.write_manifest()
+    study.fails(capsys, "e1 seed42: must stay at")
+
+
+def test_a_new_run_outside_its_folder_fails(study, capsys):
+    w = study.world
+    moved = "results/moved/e3-43"
+    shutil.copytree(w.run_dir(NEW_SLOT), w.root / moved)
+    w.paths[NEW_SLOT] = moved
+    w.write_manifest()
+    study.fails(capsys, "e3 seed43: a new run must sit in")
+
+
+def test_new_runs_from_two_commits_fail(study, capsys, tagged_repo):
+    w = study.world
+    w.edit(w.run_dir(NEW_SLOT) / "run.json", git_commit=tagged_repo[3])
+    study.fails(capsys, "the 9 new runs come from 2 commits")
+
+
+def test_a_dirty_new_run_fails(study, capsys):
+    w = study.world
+    w.edit(w.run_dir(NEW_SLOT) / "run.json", git_dirty=True)
+    study.fails(capsys, "e3 seed43: git_dirty")
+
+
+def test_new_runs_before_the_tag_fail(study, capsys):
+    w = study.world
+    for s in cs.slots():
+        if s not in KEPT_SLOTS:
+            w.edit(w.run_dir(s) / "run.json", git_commit=study.before)
+    study.fails(capsys, f"does not descend from {PREREG_TAG}")
+
+
+def test_a_changed_lock_file_fails(study, capsys, monkeypatch, tmp_path):
+    repo = tmp_path / "lockrepo"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+             "-c", "commit.gpgsign=false", *args],
+            check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(lock):
+        (repo / "uv.lock").write_text(lock)
+        git("add", "-A")
+        git("commit", "-q", "-m", lock)
+        return git("rev-parse", "HEAD")
+
+    git("init", "-q")
+    old = commit("old")
+    git("tag", "-a", PREREG_TAG, "-m", "tag")
+    new = commit("new")
+    w = study.world
+    for s in cs.slots():
+        if s not in KEPT_SLOTS:
+            w.edit(w.run_dir(s) / "run.json", git_commit=new)
+    monkeypatch.setattr(check, "REPO", repo)
+    monkeypatch.setattr(check, "LOCK_COMMIT", old)
+    study.fails(capsys, "uv.lock differs")
+
+
+def test_an_unknown_lock_commit_fails(study, capsys, monkeypatch):
+    monkeypatch.setattr(check, "LOCK_COMMIT", "0" * 40)
+    study.fails(capsys, "uv.lock differs")
+
+
+# covers: AC-2. A presence channel adds weights to the first layer, so n_params shows it.
+def test_e3b_with_more_weights_than_e1_fails(study, capsys):
+    w = study.world
+    w.edit(w.run_dir(("e3b", 43)) / "run.json", n_params=10)
+    study.fails(capsys, "e3b seed43: n_params differs from E1")
+
+
+def test_the_real_e3b_config_passes():
+    assert check.e3b_config_problems() == []
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda c: c["train"].update(iterations=1), "outside [strategy]"),
+    (lambda c: c["strategy"].update(complete_share=0.25), "is not exposure"),
+    (lambda c: c["strategy"].update(name="dropout"), "is not exposure"),
+])
+def test_a_changed_e3b_config_fails(tmp_path, change, message):
+    cfg = load_config(check.E3B_CONFIG)
+    change(cfg)
+    path = tmp_path / "e3b.toml"
+    dump_config(cfg, path)
+    assert message in " ".join(check.e3b_config_problems(path))
+
+
+# covers: AC-7
+def test_val_evals_from_two_commits_fail(study, capsys, tagged_repo):
+    w = study.world
+    w.edit(w.eval_dir(NEW_SLOT) / "run.json", git_commit=tagged_repo[3])
+    study.fails(capsys, "the 12 val evals come from 2 commits")
+
+
+def test_a_dirty_val_eval_fails(study, capsys):
+    w = study.world
+    w.edit(w.eval_dir(NEW_SLOT) / "run.json", git_dirty=True)
+    study.fails(capsys, "e3 seed43: git_dirty")
+
+
+def test_a_missing_val_eval_fails(study, capsys):
+    w = study.world
+    (w.eval_dir(NEW_SLOT) / "run.json").unlink()
+    study.fails(capsys, "run.json missing")
+
+
+# covers: AC-26, one model fails alone and the others still say ok
+def test_a_moved_score_fails_that_model_only(study, capsys):
+    w = study.world
+    nudge(w.eval_dir(("e3", 42)), "dice", 0.01)
+    assert study.run() == 1
+    out = capsys.readouterr().out
+    assert "AC-26 e3: FAIL" in out
+    assert "AC-26 e1: ok" in out and "AC-26 e4: ok" in out
+
+
+@pytest.mark.parametrize("where", ["new", "old"])
+def test_a_missing_score_file_is_a_failure_not_a_pass(study, capsys, where):
+    w = study.world
+    folder = w.eval_dir(("e4", 42)) if where == "new" else w.root / study.kept["e4"][1]
+    (folder / "metrics.csv").unlink()
+    study.fails(capsys, "AC-26 e4: FAIL")
+
+
+# covers: AC-6
+def add_replaced(study, entries):
+    with open(study.world.manifest, "a") as f:
+        f.writelines(f'{run} = "{why}"\n' for run, why in entries)
+
+
+def test_a_replaced_run_with_its_reason_passes(study):
+    add_replaced(study, [("old-run", "e3 seed43: check_baseline failed")])
+    assert study.run() == 0
+
+
+@pytest.mark.parametrize("entries, message", [
+    ([("e3-43", "e3 seed43: failed")], "still in a slot"),
+    ([("old-run", "e3 seed43:  ")], "write it as"),
+    ([("old-run", "no slot here")], "write it as"),
+    ([("a", "e3 seed43: x"), ("b", "e3 seed43: y"), ("c", "e3 seed43: z")], "3 repeats"),
+])
+def test_a_bad_replaced_entry_fails(study, capsys, entries, message):
+    add_replaced(study, entries)
+    study.fails(capsys, message)
+
+
+# covers: AC-1, a slot the spec does not have
+def test_an_extra_seed_fails(study, capsys):
+    text = study.world.manifest.read_text().replace("[e1]\n", '[e1]\nseed45 = "results/x"\n')
+    study.world.manifest.write_text(text)
+    study.fails(capsys, "unknown entry e1.seed45")
+
+
+def test_a_failed_new_run_fails(study, capsys):
+    w = study.world
+    w.edit(w.run_dir(NEW_SLOT) / "run.json", status="failed")
+    study.fails(capsys, "e3 seed43: status")
+
+
+# covers: AC-5, the three constants
+def test_the_kept_runs_are_the_ones_of_the_spec():
+    assert {a: Path(run).name for a, (run, _) in check.KEPT.items()} == {
+        "e1": "20261103-023817-f9b3afb6", "e3": "20261106-024450-10cfa2cc",
+        "e4": "20261106-235247-8999a39e"}
+    assert all(old.endswith(f"{Path(run).name}-val") for run, old in check.KEPT.values())
+
+
+# covers: AC-23, on the real manifest, with 9 slots still empty
+def test_the_real_manifest_fails_until_the_runs_exist(capsys):
+    assert check.main(["--runs", str(REPO / "experiments/0007-confirmation/runs.toml")]) == 1
+    assert "no entry for e3b seed44" in capsys.readouterr().out
+
+
+# ---- records (AC-25) ----
+
+KAGGLE = (REPO / "experiments/0007-confirmation/KAGGLE.md").read_text()
+
+
+def test_each_training_and_sweep_command_names_its_out_folder():
+    commands = [line for line in KAGGLE.splitlines()
+                if "train.py --config" in line or "0004-missing-eval/evaluate.py" in line]
+    assert len(commands) == 4
+    assert all("--out" in line for line in commands)
+
+
+def test_the_kaggle_steps_cover_every_slot_with_e3b_last():
+    table = re.findall(r"\| `(\w+)` \| ([\d, ]+) \|", KAGGLE)
+    assert [arm for arm, _ in table] == ["e1", "e3", "e4", "e3b"]
+    new = {(arm, int(s)) for arm, seeds in table for s in seeds.split(", ")}
+    assert new == set(cs.slots()) - set(KEPT_SLOTS)
+
+
+def test_the_kaggle_clone_keeps_the_tags():
+    assert '"git", "clone", "-q", URL' in KAGGLE
+    assert "--depth" not in KAGGLE.replace("never `--depth 1`", "")
+
+
+def test_the_records_name_the_new_dataset_and_not_the_old_one():
+    data = (REPO / "data/DATA.md").read_text()
+    adr = (REPO / "docs/architecture/decisions/0002-kaggle-t4-training.md").read_text()
+    assert "muhammadnomanned/brats-confirmation-test" in data
+    assert "confirmation-test.tar.bin" in data
+    assert "muhammadnomanned/brats-confirmation-test" in adr
+    assert "muhammadnomanned/brats-joint-test" not in data + adr
+    assert "brats-confirmation-test" in KAGGLE
+
+
+def test_e3b_is_mapped_to_its_folder():
+    table = (REPO / "experiments/AGENTS.md").read_text()
+    assert re.search(r"^\| E3b \|.*\| `0007-confirmation` \|$", table, re.MULTILINE)
