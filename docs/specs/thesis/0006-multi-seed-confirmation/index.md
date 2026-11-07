@@ -219,7 +219,7 @@ Projection, from E1 and E3 timings, not a measurement. Whole notebooks fit about
 - [ ] The human checks the publication status of Cai et al. on the journal sites and Google Scholar.
 - [ ] Update `writing/proposal/proposal.tex` and the RQ wording in `context/project-overview.md` for the new claim, then add Cai et al., Öchsner et al. and others to `writing/refs.bib` with verification.
 - [ ] `/architect` cross dataset evaluation, with its ADR, for BraTS Africa (scope feature 10). Its independence from BraTS 2023 GLI must be shown in `data/DATA.md`.
-- [ ] Record the Kaggle session limit in ADR 0002 before the tag, because the 12 test sweeps must span sessions.
+- [x] Record the Kaggle session limit in ADR 0002 before the tag, because the 12 test sweeps must span sessions.
 - [x] The human gives the E4 run id, and records that its checks passed. It goes in AC-5 and `check_confirmation.py`.
 - [x] Copy the E4 output to the laptop. Only the E3 output folder exists there today.
 
