@@ -23,7 +23,7 @@ A manuscript by Cai et al. 2026 already compares zero fill, modality dropout and
 - **AC-2 E3b draw.** `draw_exposure_patterns(rng, n, complete_share)` in `common/strategies.py` calls `rng.random(n)` once, then `rng.integers(2, 16, size=n)` once. A sample gets pattern 1 if its first value is below `complete_share`, otherwise its second value, so each of the 14 incomplete patterns has equal chance. `_drop` takes the draw function as an argument, with `draw_patterns` as the default. `exposure_hook` uses it, `complete_share` is bound in `strategy_hooks(cfg)` with `functools.partial`, and the image hook is `keep_image`. `experiments/0007-confirmation/e3b.toml` is `experiments/0005-strategies/e3.toml` with only `[strategy]` changed to `name = "exposure"` and `complete_share = 0.5`. E3b has 4 input channels and no presence channels.
 - **AC-3 Old draws unchanged.** `draw_patterns`, `dropout_hook` and `presence_hook` give identical output for the same `rng` state before and after this change, proven by a test with fixed expected values. So seed 42 of E1, E3 and E4 stay valid.
 - **AC-4 Strategy guard.** `STRATEGIES` holds `"exposure"`. `strategy_problems` refuses `complete_share` outside the open range 0 to 1, a missing `complete_share` for `exposure`, and any `complete_share` on another strategy.
-- **AC-5 Seed 42 runs kept.** The seed 42 runs of E1 (`20261103-023817-f9b3afb6`), E3 (`20261106-024450-10cfa2cc`) and E4 (its run id goes in before the tag, see Follow-up) are kept, and `check_confirmation.py` holds these three ids as constants. The 9 new runs all come from one clean commit that descends from `prereg-v1`. Training order: E1, then E3 and E4, then E3b last. If quota runs short, E3b is dropped as a whole through the amendment path of AC-31, before any E3b val number is seen.
+- **AC-5 Seed 42 runs kept.** The seed 42 runs of E1 (`20261103-023817-f9b3afb6`), E3 (`20261106-024450-10cfa2cc`) and E4 (`20261106-235247-8999a39e`) are kept, and `check_confirmation.py` holds these three ids as constants. The 9 new runs all come from one clean commit that descends from `prereg-v1`. Training order: E1, then E3 and E4, then E3b last. If quota runs short, E3b is dropped as a whole through the amendment path of AC-31, before any E3b val number is seen.
 - **AC-6 Repeat rule.** A run is repeated only if it failed, or a named check failed (AC-20), with the reason recorded in `context/progress-tracker.md`. A score that fails `BEST_SCORE_MIN` in `check_baseline.py` counts as a failed check. Any other low score is never a reason. A slot gets at most 2 repeats. A replaced run id stays in `runs.toml` under `[replaced]` with its reason. A slot that still fails stops the study until the amendment path of AC-31 is used. Every finished seed stays in the analysis.
 
 *Volume*
@@ -220,8 +220,8 @@ Projection, from E1 and E3 timings, not a measurement. Whole notebooks fit about
 - [ ] Update `writing/proposal/proposal.tex` and the RQ wording in `context/project-overview.md` for the new claim, then add Cai et al., Öchsner et al. and others to `writing/refs.bib` with verification.
 - [ ] `/architect` cross dataset evaluation, with its ADR, for BraTS Africa (scope feature 10). Its independence from BraTS 2023 GLI must be shown in `data/DATA.md`.
 - [ ] Record the Kaggle session limit in ADR 0002 before the tag, because the 12 test sweeps must span sessions.
-- [ ] The human gives the E4 run id, and records that its checks passed. It goes in AC-5 and `check_confirmation.py`.
-- [ ] Copy the E4 output to the laptop. Only the E3 output folder exists there today.
+- [x] The human gives the E4 run id, and records that its checks passed. It goes in AC-5 and `check_confirmation.py`.
+- [x] Copy the E4 output to the laptop. Only the E3 output folder exists there today.
 
 ## Rationale
 
