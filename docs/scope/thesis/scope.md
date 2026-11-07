@@ -169,7 +169,7 @@ Done when: `prereg-v1` is public, all 12 models pass their checks, the literatur
   - [ ] Human runs: 9 new trainings, 12 val evals, val compare, gate, test opening
 - [ ] Verify it: /check verify confirmation study
 - [ ] Test it: /test confirmation study
-- [ ] Review it (fresh model): /check review confirmation study
+- [x] Review it (fresh model): /check review confirmation study
 - [ ] Document it: /document confirmation study
 
 ## Slice 5: Extensions (optional)
