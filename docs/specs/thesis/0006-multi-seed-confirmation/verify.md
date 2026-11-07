@@ -21,3 +21,19 @@ _Steps derived from spec 0006 acceptance criteria. `/check verify` runs these; `
 - AC-9 by the real manifest test and the path guards · AC-10 by the guard table, tag and protocol tests · AC-11 by the averaging, unit and non finite tests
 - AC-13 by the known answer and verdict tests · AC-24, H2 part only, by the three identical seeds test
 - Not covered yet: every other AC, in later milestones.
+
+## Milestone 2 (added 2026-11-07)
+Toy folders only, until the human runs. The full `uv run pytest -q` is for the human: it was killed here before it finished.
+- [ ] `uv run pytest -q tests/test_confirmation_compare.py tests/test_common_evaluation.py tests/test_common_strategies.py tests/test_strategy_compare.py tests/test_strategy_runs.py tests/test_missing_eval.py tests/test_experiment_scripts.py` → all pass → AC-7, AC-12, AC-14 to AC-18, AC-24, AC-26, AC-29
+- [ ] `uv run pytest -q` → all pass → AC-23
+- [ ] In `compare_seeds.py`, a CI of exactly minus 0.015 to 0.01 → `inconclusive`, never `equivalent` → AC-14
+- [ ] On the 12 real val evals, `compare_seeds.py --fold val` → 18 verdict lines, `summary.csv` 87 rows, `patterns.csv` 360, `per_seed.csv` 180, `volume.csv` 180, `run.json` last → AC-17, AC-18
+- [ ] Run it again with `--rerun-reason "<text>"`, into a copy → CSVs and verdict byte identical, the old folder kept as `.superseded-<stamp>` → AC-17
+- [ ] `0007-confirmation/make_table.py --compare <dir>` → 7 files whose captions start with the fold note and give n and the 3 seeds; they build in XeLaTeX with `longtable` in the preamble → AC-29
+- [ ] Set `status` in a copy of `run.json` to anything but `ok` → exit 1, older tables unchanged → AC-29
+
+## Value sourcing, milestone 2
+- [ ] Voxel size: run `sweep` on a case with spacing that is not 1 mm → `pred_ml` and `true_ml` scale with the product of `d["pixdim"]` → AC-7
+- [ ] Margin: `EQUIV_MARGIN` in `compare_seeds.py`, recorded as `equiv_margin` in `run.json`, a sealed file → AC-14, AC-28
+- [ ] Bootstrap settings and `alpha`: from the eval folder config, as a test already proves → AC-11
+- [ ] `true_ml` for WT on the 3 seed 42 evals, within 0.1 mL of `ml_WT`, and scores unchanged, through `rescore_problems` → AC-26

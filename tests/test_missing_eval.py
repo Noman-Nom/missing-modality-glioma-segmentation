@@ -277,7 +277,8 @@ def write_toy_metrics(path, drop=None, dice=falls_by_a_tenth, hd95=lambda case, 
                                 "subject": f"0000{i}", "pattern_id": p, "region": g,
                                 "pattern_name": PATTERNS[p].name, "gt_empty": False,
                                 "dice": dice(i, p), "hd95_mm": hd95(i, p),
-                                "pred_empty": p == 15 and i == 0})
+                                "pred_empty": p == 15 and i == 0, "pred_ml": 1.0,
+                                "true_ml": 1.0})
 
 
 def test_analyse_known_answer(tmp_path):

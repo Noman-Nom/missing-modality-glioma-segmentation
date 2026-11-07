@@ -15,6 +15,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
+
 from common.cache import cache_dir, repo_path, sha256_file
 from common.data import (
     MODALITIES,
@@ -43,7 +45,8 @@ PROTOCOL_FILES = (
 )
 PROTOCOL_SOURCES = (predict, cached_items, cached_eval_transforms, CachedCase, label_to_regions)
 METRIC_COLUMNS = ["eval_id", "case", "subject", "pattern_id", "pattern_name", "region", "dice",
-                  "hd95_mm", "sensitivity", "precision", "gt_empty", "pred_empty"]
+                  "hd95_mm", "sensitivity", "precision", "gt_empty", "pred_empty", "pred_ml",
+                  "true_ml"]
 # every key is present in every eval run.json (null where not yet known); spec 0004, Data model
 EVAL_RUN_KEYS = (
     "eval_id", "status", "reason", "quick", "fold", "n_cases", "source_run", "source_run_id",
@@ -190,6 +193,32 @@ def _nan(v):
         return True
 
 
+def volume_ml(mask, pixdim):
+    """The volume of a binary mask in mL: voxel count x voxel size in mm^3 / 1000 (spec 0006, AC-7).
+    Python float, so metrics.csv keeps every digit."""
+    voxels = int(np.asarray(mask).astype(bool).sum())
+    return float(voxels * math.prod(float(s) for s in pixdim) / 1000)
+
+
+def _volume_problems(rows):
+    """AC-7 of spec 0006: both volume columns present, not negative, true_ml the same on every row
+    of a (case, region). Returns error strings."""
+    empty = sum(1 for r in rows if _nan(r.get("pred_ml")) or _nan(r.get("true_ml")))
+    if empty:
+        return [f"{empty} row(s) with no pred_ml or true_ml"]
+    errors = []
+    negative = sum(1 for r in rows if float(r["pred_ml"]) < 0 or float(r["true_ml"]) < 0)
+    if negative:
+        errors.append(f"{negative} row(s) with a negative volume")
+    true_ml = {}
+    for r in rows:
+        true_ml.setdefault((r["case"], r["region"]), set()).add(r["true_ml"])
+    moved = sum(1 for values in true_ml.values() if len(values) > 1)
+    if moved:
+        errors.append(f"true_ml is not constant on {moved} (case, region) pair(s)")
+    return errors
+
+
 def _tie_out(rec, rows, source_run):
     """AC-9: pattern 1 of a val eval against the E1 metrics_val.csv. Returns error strings."""
     path = source_run / "metrics_val.csv"
@@ -272,6 +301,7 @@ def check_rules(eval_dir, source_run):
     if nans:
         errors.append(f"{nans} row(s) with no Dice or HD95")
         return errors
+    errors += _volume_problems(rows)
     if rec["fold"] == "val":
         errors += _tie_out(rec, rows, source_run)
     else:
@@ -373,7 +403,9 @@ def sweep(model, cases, cfg, device, writer, patterns=range(1, 16), done=frozens
                 if math.isnan(m["dice"]) or math.isnan(m["hd95_mm"]):
                     raise ValueError(f"NaN metric in {case} pattern {p} {region}")
                 rows.append({"case": case, "subject": subject_of(case), "pattern_id": p,
-                             "pattern_name": PATTERNS[p].name, "region": region, **m})
+                             "pattern_name": PATTERNS[p].name, "region": region, **m,
+                             "pred_ml": volume_ml(pred[ri], d["pixdim"]),
+                             "true_ml": volume_ml(d["label"][ri], d["pixdim"])})
             seconds["predict_seconds"] += middle - start
             seconds["metric_seconds"] += time.perf_counter() - middle
             writer(rows)

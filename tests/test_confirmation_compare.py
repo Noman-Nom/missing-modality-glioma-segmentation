@@ -1,7 +1,9 @@
 """Spec 0006: compare_seeds.py on toy run and eval folders with known answers. Covers AC-9 to AC-11,
 AC-13, and the H2 part of AC-24. Nothing here trains or scores a model, and no number here is a
-result. Each test is one rule, stated in its name, shown on 12 toy folders."""
+result. Each test is one rule, stated in its name, shown on 12 toy folders. Also covers AC-7 and
+AC-12 to AC-18 and AC-24 to AC-26 and AC-29."""
 import csv
+import hashlib
 import importlib.util
 import json
 import math
@@ -12,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from common.data import REGIONS
-from common.evaluation import METRIC_COLUMNS, PREREG_TAG, protocol_hash
+from common.evaluation import METRIC_COLUMNS, PREREG_TAG, PROTOCOL_FILES, protocol_hash
 from common.missing import PATTERNS
 from common.runlog import config_hash, dump_config, load_config
 from conftest import write_splits
@@ -59,7 +61,17 @@ def toy_hd95(arm, seed):
     return lambda c, p, g: 10.0 - INDEX[c] / 100 * (arm != "e1") - (seed - 43) * 0.5
 
 
-def write_metrics(path, dice, hd95):
+def true_ml(case):
+    return 20.0 + INDEX[case]
+
+
+def toy_bias(arm, seed):
+    """Predicted minus true volume: a known mean per slot, and a spread that sums to zero."""
+    mean = {"e1": 1.0, "e3": 2.0, "e4": 3.0, "e3b": 4.0}[arm] + (seed - 43)
+    return lambda c, p: mean + (INDEX[c] - (N - 1) / 2) * 0.2
+
+
+def write_metrics(path, dice, hd95, bias=lambda c, p: 0.0):
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
@@ -70,7 +82,8 @@ def write_metrics(path, dice, hd95):
                                 "pattern_id": p, "pattern_name": PATTERNS[p].name, "region": g,
                                 "dice": dice(c, p, g), "hd95_mm": hd95(c, p, g),
                                 "sensitivity": 0.5, "precision": 0.5, "gt_empty": False,
-                                "pred_empty": False})
+                                "pred_empty": False, "pred_ml": true_ml(c) + bias(c, p),
+                                "true_ml": true_ml(c)})
 
 
 @pytest.fixture(scope="session")
@@ -153,7 +166,7 @@ class World:
              "source_run_id": f"{s[0]}-{s[1]}", "protocol_hash": PROTOCOL, "splits_sha256": "s",
              "config_hash": config_hash(load_config(d / "config.toml")), "versions": VERSIONS,
              "source_best_iteration": 1, "source_best_sha256": s[0], "git_commit": self.commit}))
-        write_metrics(d / "metrics.csv", self.dice[s], self.hd95[s])
+        write_metrics(d / "metrics.csv", self.dice[s], self.hd95[s], toy_bias(*s))
 
     def edit(self, path, **fields):
         rec = json.loads(Path(path).read_text())
@@ -169,8 +182,8 @@ class World:
         return ["--runs", str(self.manifest), "--fold", fold, "--evals", str(self.evals),
                 "--out", str(self.out), "--root", str(self.root)]
 
-    def run(self, fold="val"):
-        return cs.main(self.args(fold))
+    def run(self, fold="val", *more):
+        return cs.main([*self.args(fold), *more])
 
     def folder(self):
         return self.out / "compare-val"
@@ -255,11 +268,12 @@ def test_three_identical_seeds_give_the_lines_of_the_old_compare(world):
         assert b["ci_low"] == pytest.approx(a["ci_low"], abs=1e-12)
 
 
-def test_verdict_is_written_with_nine_lines_in_order(world):
+# covers: AC-18
+def test_verdict_is_written_with_eighteen_lines_in_order(world):
     assert world.run() == 0
     lines = (world.folder() / "verdict.txt").read_text().splitlines()
-    assert [ln.split(":")[0] for ln in lines] == [f"{h} {g}" for h in ("H2a", "H2b", "H2c")
-                                                  for g in REGIONS]
+    assert [ln.split(":")[0] for ln in lines] == [
+        f"{h} {g}" for h in ("H2a", "H2b", "H2c", "H3a", "H3b", "H4") for g in REGIONS]
     assert "supported (E3-E1, mean_diff=+0." in lines[0]
 
 
@@ -291,7 +305,7 @@ def test_summary_holds_the_spec_columns(world):
         "family", "metric", "region", "level", "comparison", "n", "mean_first", "mean_second",
         "mean_diff", "median_diff", "ci_low", "ci_high", "ci_level", "n_nonzero", "wilcoxon_stat",
         "p_raw", "p_holm"]
-    assert len(world.summary()) == 72
+    assert len(world.summary()) == 87
 
 
 def test_a_non_finite_derived_number_stops_and_writes_nothing(world, monkeypatch, capsys):
@@ -433,3 +447,462 @@ def test_the_real_manifest_lists_every_slot_and_the_kept_seed_42_paths():
 
 def test_the_pinned_protocol_hash_is_the_seal():
     assert cs.EXPECTED_PROTOCOL_HASH == protocol_hash()
+
+
+# ---- H3, H4, per seed view, volume, outputs (spec 0006, build steps 3 to 5) ----
+
+BIG = 40  # subjects in the known answer toys below, so the bootstrap intervals are tight
+BIG_IDX = np.random.default_rng(0).integers(0, BIG, size=(4000, BIG))
+
+
+def toy_means(complete, primary=None):
+    """Seed averaged tables for arms given as {arm: d}, the Dice above 0.5 of each of BIG subjects:
+    complete on pattern 1, primary on the 14 others. An arm not named sits at 0.5."""
+    primary = primary or {}
+    rows = {arm: pd.DataFrame(
+        [{"case": f"c{i:03d}", "region": g, "pattern_id": p,
+          "dice": 0.5 + (complete if p == 1 else primary).get(arm, np.zeros(BIG))[i],
+          "hd95_mm": 1.0} for i in range(BIG) for p in PATTERNS for g in REGIONS])
+        for arm in cs.ARMS}
+    return rows
+
+
+# covers: AC-14, AC-24, strict comparisons and the order of the checks
+@pytest.mark.parametrize(("low", "high", "word"), [
+    (-0.01, 0.01, "equivalent"),
+    (-0.014, -0.001, "equivalent"),  # below zero, but equivalence is checked first
+    (0.001, 0.014, "equivalent"),
+    (-0.015, 0.01, "inconclusive"),  # touching the margin exactly is not inside it
+    (-0.01, 0.015, "inconclusive"),
+    (-0.015, -0.001, "cost"),
+    (-0.03, -0.02, "cost"),
+    (0.001, 0.015, "gain"),
+    (0.02, 0.03, "gain"),
+    (-0.02, 0.02, "inconclusive"),
+    (-0.02, 0.0, "inconclusive"),  # zero itself is neither a cost nor a gain
+    (0.0, 0.02, "inconclusive"),
+])
+def test_cost_label(low, high, word):
+    assert cs.cost_label(low, high) == word
+
+
+# covers: AC-24
+def test_a_mean_below_zero_is_a_cost_though_most_subjects_gained():
+    d = np.r_[np.full(30, 0.01), np.full(10, -0.2)]  # 30 of 40 gained
+    (row, _) = cs.h3_rows(toy_means({"e3": d}), "WT", BIG_IDX)
+    assert row["mean_diff"] < 0 < row["median_diff"]
+    assert cs.cost_label(row["ci_low"], row["ci_high"]) == "cost"
+
+
+# covers: AC-14
+def test_h3_rows_use_pattern_1_and_one_95_ci():
+    complete = np.linspace(-0.005, 0.0071, BIG)  # uneven, so no two subjects tie in size
+    rows = cs.h3_rows(toy_means({"e3": complete}, {"e3": complete + 0.3}), "TC", BIG_IDX)
+    assert [r["comparison"] for r in rows] == ["E3-E1", "E4-E1"]
+    r = rows[0]
+    assert (r["family"], r["metric"], r["level"], r["ci_level"]) == ("H3", "dice", "complete", 95)
+    assert r["mean_diff"] == pytest.approx(complete.mean(), abs=1e-9)
+    assert (r["ci_low"], r["ci_high"]) == pytest.approx(cs.bootstrap_ci(complete, BIG_IDX, 0.95),
+                                                        abs=1e-9)
+    assert r["p_raw"] == pytest.approx(cs.paired_wilcoxon(complete)[1], abs=1e-6)
+    assert r["p_holm"] is None
+
+
+# covers: AC-14, AC-18, the template
+def test_h3_line_holds_every_field_on_a_known_row():
+    summary = [{"family": "H3", "region": g, "comparison": c, "mean_diff": -0.002,
+                "median_diff": 0.001, "ci_low": -0.004, "ci_high": 0.0035, "p_raw": 0.25}
+               for g in REGIONS for c in ("E3-E1", "E4-E1")]
+    per_seed = [{"metric": "dice", "region": g, "level": "complete", "comparison": c,
+                 "mean_diff": v} for g in REGIONS for c in ("E3-E1", "E4-E1")
+                for v in (-0.01, -0.02, 0.03)]
+    lines = cs.h3_verdict(summary, per_seed)
+    assert len(lines) == 6
+    assert lines[0] == ("H3a WT: equivalent (E3-E1, mean_diff=-0.002000, median_diff=+0.001000, "
+                        "ci=[-0.004000, +0.003500], min_margin=0.004000, seeds_agree=2/3, "
+                        "p_raw=0.25)")
+    assert lines[3].startswith("H3b WT: equivalent (E4-E1,")
+
+
+def test_seeds_agree_ignores_other_regions_levels_and_metrics():
+    other = [{"metric": "hd95_mm", "region": "WT", "level": "complete", "comparison": "E3-E1",
+              "mean_diff": 1.0},
+             {"metric": "dice", "region": "TC", "level": "complete", "comparison": "E3-E1",
+              "mean_diff": 1.0},
+             {"metric": "dice", "region": "WT", "level": "incomplete", "comparison": "E3-E1",
+              "mean_diff": 1.0}]
+    mine = {"metric": "dice", "region": "WT", "level": "complete", "comparison": "E3-E1",
+            "mean_diff": 1.0}
+    assert cs.seeds_agree([*other, mine], "WT", "E3-E1", 0.5) == 1
+
+
+def h4_word(complete, primary):
+    rows = cs.h4_rows(toy_means({"e3b": complete}, {"e3b": primary}), "WT", BIG_IDX)
+    summary = [{**r, "region": g} for g in REGIONS for r in rows]
+    return cs.h4_verdict(summary, 0.05)[0].split(":")[1].split(" (")[0].strip()
+
+
+GAIN = np.linspace(0.01, 0.03, BIG)
+
+
+# covers: AC-15, both parts must hold
+def test_h4_is_supported_with_a_gain_and_no_real_loss_on_the_primary():
+    assert h4_word(GAIN, np.linspace(-0.005, 0.005, BIG)) == "supported"
+
+
+def test_h4_fails_when_the_primary_lower_bound_passes_the_margin():
+    assert h4_word(GAIN, np.linspace(-0.04, -0.02, BIG)) == "not supported"
+
+
+def test_h4_fails_without_a_gain_at_pattern_1():
+    assert h4_word(-GAIN, np.linspace(-0.005, 0.005, BIG)) == "not supported"
+
+
+def test_h4_fails_when_the_mean_gained_but_the_median_did_not():
+    d = np.r_[np.full(36, -0.001), np.full(4, 0.2)]
+    d = d + np.arange(BIG) * 1e-7  # no exact ties, so the ranks are not rounding noise
+    assert d.mean() > 0 > np.median(d)
+    assert h4_word(d, np.zeros(BIG)) == "not supported"
+
+
+def test_h4_fails_when_the_gain_is_not_significant():
+    d = np.linspace(-0.05, 0.0505, BIG)
+    assert d.mean() > 0 and np.median(d) > 0 and cs.paired_wilcoxon(d)[1] > 0.05
+    assert h4_word(d, np.zeros(BIG)) == "not supported"
+
+
+# covers: AC-15, AC-24, a 90% bound for H4 and a 95% CI for the pattern 1 row
+def test_h4_primary_row_holds_the_90_bound():
+    primary = np.linspace(-0.05, 0.05, BIG)
+    complete_row, primary_row = cs.h4_rows(toy_means({"e3b": GAIN}, {"e3b": primary}), "ET", BIG_IDX)
+    assert (complete_row["level"], complete_row["ci_level"]) == ("complete", 95)
+    assert (primary_row["level"], primary_row["ci_level"]) == ("incomplete", 90)
+    assert primary_row["ci_low"] == pytest.approx(cs.bootstrap_ci(primary, BIG_IDX, 0.90)[0],
+                                                  abs=1e-9)
+    assert primary_row["ci_low"] > cs.bootstrap_ci(primary, BIG_IDX, 0.95)[0]
+    assert complete_row["p_holm"] is None and primary_row["p_holm"] is None
+
+
+def test_h4_line_is_the_template():
+    summary = [{"family": "H4", "region": g, "level": level, "mean_diff": 0.01, "median_diff": 0.02,
+                "p_raw": 0.001, "ci_low": -0.01} for g in REGIONS
+               for level in ("complete", "incomplete")]
+    assert cs.h4_verdict(summary, 0.05)[0] == (
+        "H4 WT: supported (E3b-E3, complete_mean_diff=+0.010000, complete_median_diff=+0.020000, "
+        "complete_p=0.001, primary_ci90_low=-0.010000)")
+
+
+def rows_of(t, **fields):
+    for k, v in fields.items():
+        t = t[t[k] == v]
+    return t
+
+
+# covers: AC-17, Output schemas
+def test_summary_families_and_their_rows(world):
+    assert world.run() == 0
+    t = pd.read_csv(world.folder() / "summary.csv", keep_default_na=False)
+    assert t["family"].value_counts().to_dict() == {"H2": 72, "H3": 6, "H4": 6, "descriptive": 3}
+    assert t["family"].drop_duplicates().tolist() == ["H2", "H3", "H4", "descriptive"]
+    assert set(rows_of(t, family="H3")["ci_level"].astype(int)) == {95}
+    assert set(rows_of(t, family="H4", level="incomplete")["ci_level"].astype(int)) == {90}
+    assert set(rows_of(t, family="H4", level="complete")["ci_level"].astype(int)) == {95}
+    e = rows_of(t, family="descriptive")
+    assert set(e["comparison"]) == {"E3b-E1"} and set(e["p_raw"]) == {""}
+    assert set(t[t["family"] != "H2"]["p_holm"]) == {""}
+
+
+# covers: AC-12
+def test_per_seed_is_each_seed_alone_with_no_p_value(world):
+    assert world.run() == 0
+    t = pd.read_csv(world.folder() / "per_seed.csv")
+    assert list(t.columns) == cs.PER_SEED_COLUMNS
+    assert len(t) == 3 * 2 * 3 * 2 * 5
+    assert set(t["comparison"]) == {"E3-E1", "E4-E1", "E4-E3", "E3b-E3", "E3b-E1"}
+    assert set(t["level"]) == {"incomplete", "complete"}
+    # E1 has no seed step in the toy, and pattern 1 has no gain, so only incomplete rows move
+    r = rows_of(t, seed=44, metric="dice", region="WT", level="incomplete", comparison="E3-E1")
+    assert r["mean_diff"].item() == pytest.approx(0.02 + 0.001 * (N - 1) / 2, abs=1e-6)
+    r = rows_of(t, seed=44, metric="dice", region="WT", level="complete", comparison="E3-E1")
+    assert r["mean_diff"].item() == pytest.approx(0.0, abs=1e-9)
+
+
+# covers: AC-16, by hand: the spread of 0.2 * (i - 4.5) over 10 subjects has ddof 1 sd 0.2 * sd(0..9)
+def test_volume_is_per_seed_with_known_limits_of_agreement(world):
+    assert world.run() == 0
+    t = pd.read_csv(world.folder() / "volume.csv")
+    assert list(t.columns) == cs.VOLUME_COLUMNS and len(t) == 180
+    assert t["arm"].drop_duplicates().tolist() == ["E1", "E3", "E4", "E3b"]
+    assert t["seed"].tolist()[:30] == [42] * 15 + [43] * 15
+    assert t["pattern_id"].tolist()[:15] == list(PATTERNS)
+    sd = 0.2 * np.std(np.arange(N), ddof=1)
+    r = rows_of(t, arm="E3b", seed=44, pattern_id=7)
+    assert r["n"].item() == N
+    assert r["mean_diff_ml"].item() == pytest.approx(5.0, abs=1e-6)
+    assert r["loa_low_ml"].item() == pytest.approx(5.0 - 1.96 * sd, abs=1e-5)
+    assert r["loa_high_ml"].item() == pytest.approx(5.0 + 1.96 * sd, abs=1e-5)
+
+
+# covers: Output schemas, patterns.csv
+def test_patterns_holm_over_15_per_comparison(world):
+    assert world.run() == 0
+    t = pd.read_csv(world.folder() / "patterns.csv")
+    assert list(t.columns) == cs.PATTERN_COLUMNS and len(t) == 360
+    assert set(t["comparison"]) == {"E3-E1", "E4-E1", "E4-E3", "E3b-E3"}
+    one = rows_of(t, metric="dice", region="WT", comparison="E3b-E3").sort_values("pattern_id")
+    assert one["p_holm"].to_numpy() == pytest.approx(cs.holm(one["p_raw"].to_numpy()), abs=2e-5)
+
+
+# covers: AC-17, Output schemas
+def test_run_json_holds_the_record_and_comes_with_every_output(world):
+    assert world.run() == 0
+    assert {f.name for f in world.folder().iterdir()} == {
+        "summary.csv", "patterns.csv", "per_seed.csv", "volume.csv", "verdict.txt", "run.json"}
+    rec = json.loads((world.folder() / "run.json").read_text())
+    assert tuple(rec) == cs.RUN_JSON_KEYS
+    assert rec["status"] == "ok" and rec["n_cases"] == N and rec["seeds"] == [42, 43, 44]
+    assert rec["equiv_margin"] == 0.015 and rec["prereg_tag"] == PREREG_TAG
+    assert rec["run_ids"]["e3b_seed44"] == "e3b-44" and len(rec["run_ids"]) == 12
+    assert rec["eval_commits"]["e1_seed42"] == world.commit and len(rec["eval_commits"]) == 12
+    assert rec["n_resumes"]["e4_seed43"] == 0 and rec["versions_equal"] is True
+    assert rec["compare_hash"] == cs.compare_hash() and rec["alpha"] == 0.05
+
+
+# covers: AC-28, the hash only here; the refusal comes with build step 6
+def test_compare_hash_is_over_the_sealed_files_in_order():
+    assert cs.SEALED_FILES[:len(PROTOCOL_FILES)] == PROTOCOL_FILES
+    assert cs.SEALED_FILES[len(PROTOCOL_FILES):] == (
+        "experiments/common/strategies.py", "experiments/common/model.py",
+        "experiments/0004-missing-eval/evaluate.py",
+        "experiments/0007-confirmation/compare_seeds.py")
+    assert cs.compare_hash() == hashlib.sha256(
+        b"".join((REPO / n).read_bytes() for n in cs.SEALED_FILES)).hexdigest()
+
+
+# covers: AC-17, rerun rules
+def test_a_finished_folder_needs_a_reason(world, capsys):
+    assert world.run() == 0
+    assert world.run() == 2
+    assert "give --rerun-reason" in capsys.readouterr().out
+
+
+def test_a_rerun_keeps_the_old_folder_and_records_the_reason(world):
+    assert world.run() == 0
+    assert world.run("val", "--rerun-reason", "a stated reason") == 0
+    rec = json.loads((world.folder() / "run.json").read_text())
+    assert rec["rerun_reason"] == "a stated reason"
+    assert (world.out / rec["superseded"] / "run.json").is_file()
+
+
+def test_a_reason_with_no_finished_folder_is_refused(world, capsys):
+    assert world.run("val", "--rerun-reason", "x") == 2
+    assert "not one" in capsys.readouterr().out
+
+
+def test_an_unfinished_folder_is_not_replaced(world, capsys):
+    (world.out / "compare-val").mkdir(parents=True)
+    assert world.run("val", "--rerun-reason", "x") == 2
+    assert "not finished" in capsys.readouterr().out
+
+
+def test_a_non_finite_volume_stops_and_writes_nothing(world, capsys):
+    s = ("e4", 44)
+    write_metrics(world.eval_dir(s) / "metrics.csv", world.dice[s], world.hd95[s],
+                  lambda c, p: math.inf)
+    assert world.run() == 2
+    assert "mean_diff_ml" in capsys.readouterr().out
+    assert not world.out.exists()
+
+
+# ---- volume rules in check_rules (AC-7) ----
+
+def edit_volumes(world, s, change):
+    path = world.eval_dir(s) / "metrics.csv"
+    t = pd.read_csv(path)
+    change(t)
+    t.to_csv(path, index=False)
+
+
+# covers: AC-7
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda t: t.pop("pred_ml"), "no pred_ml or true_ml"),
+    (lambda t: t.__setitem__("true_ml", math.nan), "no pred_ml or true_ml"),
+    (lambda t: t.__setitem__("pred_ml", -1.0), "negative volume"),
+    (lambda t: t.loc.__setitem__((t.index[0], "true_ml"), 99.0), "not constant"),
+], ids=["column gone", "empty", "negative", "true_ml moves"])
+def test_check_rules_guards_the_volume_columns(world, capsys, change, message):
+    edit_volumes(world, S, change)
+    refused(world, capsys, message)
+
+
+# ---- rescore proof (AC-26) ----
+
+check = load("0007-confirmation", "check_confirmation")
+
+
+@pytest.fixture
+def rescore(tmp_path):
+    """An old eval, a new eval with the same scores, and a splits file with the audit volumes."""
+    new, old = tmp_path / "new", tmp_path / "old"
+    new.mkdir()
+    old.mkdir()
+    dice, hd95 = toy_dice("e3", 42), toy_hd95("e3", 42)
+    write_metrics(new / "metrics.csv", dice, hd95)
+    write_metrics(old / "metrics.csv", dice, hd95)
+    splits = tmp_path / "splits.csv"
+    pd.DataFrame({"case": VAL, "ml_WT": [true_ml(c) for c in VAL]}).to_csv(splits, index=False)
+    return new, old, splits
+
+
+def nudge(folder, column, by, region="WT"):
+    t = pd.read_csv(folder / "metrics.csv")
+    t.loc[t.index[t["region"] == region][0], column] += by
+    t.to_csv(folder / "metrics.csv", index=False)
+
+
+def test_rescore_passes_on_the_same_scores(rescore):
+    assert check.rescore_problems(*rescore) == []
+
+
+def test_rescore_tolerates_differences_inside_the_limits(rescore):
+    nudge(rescore[0], "dice", 0.00009)
+    nudge(rescore[0], "hd95_mm", 0.009)
+    assert check.rescore_problems(*rescore) == []
+
+
+# covers: AC-26, "a changed score on seed 42 fails"
+@pytest.mark.parametrize(("column", "by"), [("dice", 0.0002), ("dice", -0.0002),
+                                            ("hd95_mm", 0.02), ("hd95_mm", -0.02)])
+def test_rescore_fails_past_the_limit_even_on_one_row(rescore, column, by):
+    nudge(rescore[0], column, by, region="ET")
+    (error,) = check.rescore_problems(*rescore)
+    assert column in error and error.startswith("1 row(s)")
+
+
+def test_rescore_checks_true_volume_against_the_audit_on_wt_only(rescore):
+    t = pd.read_csv(rescore[0] / "metrics.csv")
+    t.loc[t["region"] == "TC", "true_ml"] += 5.0
+    t.to_csv(rescore[0] / "metrics.csv", index=False)
+    assert check.rescore_problems(*rescore) == []
+    t.loc[(t["region"] == "WT") & (t["case"] == VAL[3]), "true_ml"] += 0.2
+    t.to_csv(rescore[0] / "metrics.csv", index=False)
+    (error,) = check.rescore_problems(*rescore)
+    assert "true_ml of 1 case(s)" in error and VAL[3] in error
+
+
+def test_rescore_refuses_a_missing_row(rescore):
+    t = pd.read_csv(rescore[0] / "metrics.csv")
+    t.iloc[1:].to_csv(rescore[0] / "metrics.csv", index=False)
+    assert "rows differ" in check.rescore_problems(*rescore)[0]
+
+
+def test_rescore_refuses_a_missing_pattern_in_both(rescore):
+    for folder in rescore[:2]:
+        t = pd.read_csv(folder / "metrics.csv")
+        t[t["pattern_id"] != 9].to_csv(folder / "metrics.csv", index=False)
+    assert "missing" in check.rescore_problems(*rescore)[0]
+
+
+def test_rescore_refuses_a_case_the_audit_does_not_know(rescore):
+    pd.DataFrame({"case": VAL[1:], "ml_WT": [true_ml(c) for c in VAL[1:]]}).to_csv(
+        rescore[2], index=False)
+    assert "not in" in check.rescore_problems(*rescore)[0]
+
+
+# ---- tables (AC-29) ----
+
+table_script = load("0007-confirmation", "make_table")
+TABLES = ("summary", "cost", "exposure", "patterns-dice", "patterns-hd95", "seeds", "volume")
+
+
+def tables(world, tmp_path):
+    out = tmp_path / "tables"
+    return out, table_script.main(["--compare", str(world.folder()), "--out-dir", str(out)])
+
+
+def test_make_table_writes_the_seven_files(world, tmp_path):
+    assert world.run() == 0
+    out, code = tables(world, tmp_path)
+    assert code == 0
+    assert {p.name for p in out.iterdir()} == {
+        f"0007-confirmation-val-{name}.tex" for name in TABLES}
+    for name in TABLES:
+        tex = (out / f"0007-confirmation-val-{name}.tex").read_text()
+        assert r"\caption{Development fold, not a test result." in tex
+        assert f"n = {N}, seeds 42, 43 and 44." in tex
+        assert f"tab:confirmation-val-{name}" in tex
+        assert "val fold" in tex
+
+
+def test_a_test_folder_gets_the_test_caption(world, tmp_path):
+    assert world.run() == 0
+    world.edit(world.folder() / "run.json", fold="test")
+    out, code = tables(world, tmp_path)
+    assert code == 0
+    tex = (out / "0007-confirmation-test-cost.tex").read_text()
+    assert r"\caption{Test fold, opened once." in tex
+
+
+# covers: AC-29, labels come from verdict.txt, so this script decides nothing
+def test_cost_and_exposure_words_are_the_verdicts(world, tmp_path):
+    assert world.run() == 0
+    verdict = world.folder() / "verdict.txt"
+    verdict.write_text(verdict.read_text().replace("H3a WT: gain", "H3a WT: marker").replace(
+        "H3a WT: equivalent", "H3a WT: marker").replace("H3a WT: inconclusive", "H3a WT: marker")
+        .replace("H3a WT: cost", "H3a WT: marker"))
+    out, code = tables(world, tmp_path)
+    assert code == 0
+    cost = (out / "0007-confirmation-val-cost.tex").read_text()
+    assert cost.count("marker") == 1
+
+
+def test_seeds_table_has_a_row_per_metric_level_region_comparison(world, tmp_path):
+    assert world.run() == 0
+    out, _ = tables(world, tmp_path)
+    tex = (out / "0007-confirmation-val-seeds.tex").read_text()
+    body = tex.split(r"\endfoot")[1]
+    assert body.count(r"\\") == 2 * 2 * 3 * 5
+
+
+def test_volume_table_has_a_row_per_arm_and_pattern(world, tmp_path):
+    assert world.run() == 0
+    out, _ = tables(world, tmp_path)
+    tex = (out / "0007-confirmation-val-volume.tex").read_text()
+    assert tex.split(r"\endfoot")[1].count(r"\\") == 4 * 15
+
+
+@pytest.mark.parametrize("name", ["run.json", "summary.csv", "patterns.csv", "per_seed.csv",
+                                  "volume.csv", "verdict.txt"])
+def test_a_missing_file_stops_and_keeps_older_tables(world, tmp_path, name):
+    assert world.run() == 0
+    out, _ = tables(world, tmp_path)
+    before = {p: p.read_bytes() for p in out.iterdir()}
+    (world.folder() / name).unlink()
+    with pytest.raises(SystemExit) as e:
+        tables(world, tmp_path)
+    assert "ERROR" in str(e.value) and name in str(e.value)
+    assert before == {p: p.read_bytes() for p in out.iterdir()}
+
+
+def test_a_run_that_is_not_ok_stops(world, tmp_path):
+    assert world.run() == 0
+    world.edit(world.folder() / "run.json", status="failed")
+    with pytest.raises(SystemExit, match="status"):
+        tables(world, tmp_path)
+    assert not (tmp_path / "tables").exists()
+
+
+def test_a_wrong_row_count_stops(world, tmp_path):
+    assert world.run() == 0
+    t = pd.read_csv(world.folder() / "volume.csv")
+    t.iloc[1:].to_csv(world.folder() / "volume.csv", index=False)
+    with pytest.raises(SystemExit, match="rows in volume.csv"):
+        tables(world, tmp_path)
+
+
+def test_a_cut_verdict_stops(world, tmp_path):
+    assert world.run() == 0
+    verdict = world.folder() / "verdict.txt"
+    verdict.write_text("\n".join(verdict.read_text().splitlines()[:12]) + "\n")
+    with pytest.raises(SystemExit, match="H3"):
+        tables(world, tmp_path)

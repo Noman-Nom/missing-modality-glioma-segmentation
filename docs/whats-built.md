@@ -108,9 +108,13 @@ Milestones 1 to 3 of 5 built 2026-11-06 on branch `feat/e3-e4-strategies` (build
 `0006-literature/fetch_papers.py`, built 2026-11-07: `search` asks OpenAlex and logs to `docs/literature/search-log.csv` and `candidates.csv`; `download` keeps real open access PDFs in `~/literature-pdfs`, outside git, with a text copy. Closed papers get `no_open_copy`, for the human. Toy tests in `tests/test_fetch_papers.py`, plus one live trial in a scratch folder. No paper has been reviewed yet.
 
 ## L. Confirmation study (spec 0006, in progress)
-Built 2026-11-07, milestone 1 of 5. Toy folders only, no number here is a result.
+Built 2026-11-07, milestones 1 and 2 of 5. Toy folders only, no number here is a result.
 - E3b arm: `draw_exposure_patterns`, `exposure_hook` and `expected_draw_counts` in `common/strategies.py`, config `0007-confirmation/e3b.toml`. `strategy_problems` guards `complete_share`. Fixed expected values prove the old draws of E3 and E4 did not change (AC-3).
-- `0007-confirmation/compare_seeds.py`: every AC-10 guard, then the mean over 3 seeds per subject, region and pattern, then the 72 H2 rows and 9 H2 lines. A test proves 3 identical seeds give the lines of `0005-strategies/compare.py`. It writes `summary.csv` and `verdict.txt` only for now, and `--fold test` refuses until build step 6.
+- `0007-confirmation/compare_seeds.py`: every AC-10 guard, then the mean over 3 seeds per subject, region and pattern, then the 72 H2 rows and 9 H2 lines. A test proves 3 identical seeds give the lines of `0005-strategies/compare.py`. `--fold test` refuses until build step 6.
+- Same script, milestone 2: H3 cost labels (`equivalent`, `cost`, `gain`, `inconclusive`, margin 0.015), H4 exposure lines, 18 verdict lines, 87 rows in `summary.csv`, plus `patterns.csv` (360 rows), `per_seed.csv` (180), `volume.csv` (180) and `run.json` with `compare_hash`. A finished folder needs `--rerun-reason`. The row `E3b-E1` holds a CI and no test, as AC-15 asks for no more.
+- Volume: `pred_ml` and `true_ml` are the last two columns of `metrics.csv`, computed by `volume_ml` in `sweep`, and `check_rules` guards them (AC-7).
+- `0007-confirmation/check_confirmation.py`: only `rescore_problems` so far (AC-26), no command yet.
+- `0007-confirmation/make_table.py`: the 7 table files. Labels come from `verdict.txt`, so it decides nothing. The toy tables compiled once with XeLaTeX by hand. `-seeds.tex` and `-volume.tex` use `longtable`.
 - `0007-confirmation/runs.toml`: the manifest, with seed 42 of E1 and E3 filled in.
 - Seal: `PREREG_TAG` lives in a sealed file, so `protocol_hash()` is now `0bc76bfa...`, pinned in `SEALED_HASH` and `EXPECTED_PROTOCOL_HASH`, and a test keeps the two equal. The tag commit holds the final pin.
-- Not built yet: H3, H4, volume, `run.json`, tables, the test path, `check_confirmation.py`, `KAGGLE.md`.
+- Not built yet: the test path, the rest of `check_confirmation.py`, `KAGGLE.md`.

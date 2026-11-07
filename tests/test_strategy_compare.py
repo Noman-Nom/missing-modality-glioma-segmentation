@@ -65,7 +65,7 @@ def write_metrics(path, cases, dice, hd95):
                                 "pattern_id": p, "pattern_name": PATTERNS[p].name, "region": g,
                                 "dice": dice(c, p, g), "hd95_mm": hd95(c, p, g),
                                 "sensitivity": 0.5, "precision": 0.5, "gt_empty": False,
-                                "pred_empty": False})
+                                "pred_empty": False, "pred_ml": 1.0, "true_ml": 1.0})
 
 
 class World:

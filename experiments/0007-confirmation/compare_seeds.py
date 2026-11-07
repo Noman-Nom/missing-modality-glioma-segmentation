@@ -5,21 +5,24 @@
 Exit 2, printing every failed rule and writing nothing, unless the manifest, the 12 runs and the 12
 evals pass AC-10. For each subject, region and pattern, an arm's value is the mean over its 3 seeds,
 and every test runs on those means, so n is the number of subjects (AC-11). Writes
-<out>/compare-<fold>/ with summary.csv and verdict.txt. All numbers come from metrics.csv of the
-evals, so it uses no GPU.
+<out>/compare-<fold>/ with summary.csv, patterns.csv, per_seed.csv, volume.csv, verdict.txt (18
+lines: 9 H2, 6 H3, 3 H4) and run.json, last. All numbers come from metrics.csv of the evals, so it
+uses no GPU. A finished folder is refused unless --rerun-reason is given (AC-17).
 
-Built so far: build steps 1 and 2, the H2 lines. The test path is build step 6, so --fold test is
-refused until then. H3, H4, per_seed.csv, volume.csv and run.json come in later build steps.
+The test path is build step 6, so --fold test is refused until then.
 
 This repeats some of 0005-strategies/compare.py on purpose: experiments never import each other,
 and that file stays unchanged (AC-21). A test proves both give the same H2 lines (AC-24).
 """
 import argparse
 import csv
+import hashlib
+import json
 import shutil
 import subprocess
 import sys
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -27,32 +30,57 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.data import REGIONS
-from common.evaluation import PREREG_TAG, check_rules
+from common.evaluation import PREREG_TAG, PROTOCOL_FILES, check_rules
 from common.missing import PATTERNS
-from common.runlog import load_config, load_run
+from common.runlog import git_info, load_config, load_run
 from common.stats import bootstrap_ci, bootstrap_indices, holm, paired_wilcoxon
 from common.strategies import strategy_name
 
 REPO = Path(__file__).resolve().parents[2]
 # protocol_hash() at the tag commit. Repinned there, beside SEALED_HASH; a test keeps them equal.
-EXPECTED_PROTOCOL_HASH = "0bc76bfaba23b0d7b35775038b10a28b21650e5da374de4351374dfaa617f642"
+EXPECTED_PROTOCOL_HASH = "741757cfba6218188e9ef789456654a24da27c76fe9226fd1d507b27ed78ceb6"
+# The scored files after protocol_hash(): a compare is refused if one moved since the val compare
+SEALED_FILES = (*PROTOCOL_FILES, "experiments/common/strategies.py", "experiments/common/model.py",
+                "experiments/0004-missing-eval/evaluate.py",
+                "experiments/0007-confirmation/compare_seeds.py")
+EQUIV_MARGIN = 0.015  # in Dice, borrowed from Oechsner 2026 (AC-14), a sealed value
 ARMS = ("e1", "e3", "e4", "e3b")
+ARM_NAMES = {"e1": "E1", "e3": "E3", "e4": "E4", "e3b": "E3b"}
 SEEDS = (42, 43, 44)
 STRATEGIES = {"e1": None, "e3": "dropout", "e4": "presence", "e3b": "exposure"}
 COMPLETE_SHARE = 0.5
 METRICS = ("dice", "hd95_mm")
 PRIMARY = "incomplete"
+COMPLETE = "complete"
+VOLUME_REGION = "WT"
 LEVELS = {PRIMARY: [p.id for p in PATTERNS.values() if p.missing],
           **{f"missing_{n}": [p.id for p in PATTERNS.values() if len(p.missing) == n]
              for n in (1, 2, 3)}}
+SCORES = LEVELS | {COMPLETE: [p.id for p in PATTERNS.values() if not p.missing]}
 # (name, first, second): the paired difference is d = value(first) - value(second)
 H2_COMPARISONS = (("E3-E1", "e3", "e1"), ("E4-E1", "e4", "e1"), ("E4-E3", "e4", "e3"))
 H2_LINES = {"H2a": "E3-E1", "H2b": "E4-E1", "H2c": "E4-E3"}
+H3_LINES = {"H3a": ("E3-E1", "e3", "e1"), "H3b": ("E4-E1", "e4", "e1")}
+EXPOSURE = ("E3b-E3", "e3b", "e3")
+EXPOSURE_E1 = ("E3b-E1", "e3b", "e1")
+PATTERN_COMPARISONS = (*H2_COMPARISONS, EXPOSURE)
+SEED_COMPARISONS = (*H2_COMPARISONS, EXPOSURE, EXPOSURE_E1)
 SAME_RUN_KEYS = ("train_cases", "val_cases", "gpu", "cache_hash")
 SAME_EVAL_KEYS = ("fold", "n_cases", "protocol_hash", "config_hash", "splits_sha256", "gpu")
 SUMMARY_COLUMNS = ["family", "metric", "region", "level", "comparison", "n", "mean_first",
                    "mean_second", "mean_diff", "median_diff", "ci_low", "ci_high", "ci_level",
                    "n_nonzero", "wilcoxon_stat", "p_raw", "p_holm"]
+PATTERN_COLUMNS = ["metric", "region", "pattern_id", "pattern_name", "comparison", "n",
+                   "mean_first", "mean_second", "median_first", "median_second", "mean_diff",
+                   "median_diff", "ci_low", "ci_high", "n_nonzero", "wilcoxon_stat", "p_raw",
+                   "p_holm"]
+PER_SEED_COLUMNS = ["seed", "metric", "region", "level", "comparison", "mean_diff", "median_diff"]
+VOLUME_COLUMNS = ["arm", "seed", "pattern_id", "pattern_name", "n", "mean_diff_ml", "loa_low_ml",
+                  "loa_high_ml"]
+RUN_JSON_KEYS = ("compare_id", "status", "fold", "n_cases", "run_ids", "eval_commits",
+                 "versions_equal", "n_resumes", "seeds", "alpha", "equiv_margin", "compare_hash",
+                 "protocol_hash", "splits_sha256", "prereg_tag", "git_commit", "git_dirty",
+                 "rerun_reason", "superseded")
 P_COLUMNS = {"p_raw", "p_holm"}
 
 
@@ -213,16 +241,16 @@ def wide_tables(means, metric, region):
 
 def primary_score(wide, arm, level):
     """One number per subject: the mean over the level's patterns."""
-    return wide[arm][LEVELS[level]].mean(axis=1).to_numpy()
+    return wide[arm][SCORES[level]].mean(axis=1).to_numpy()
 
 
-def paired(first, second, indices, level=0.95):
+def paired(first, second, indices, ci=0.95):
     """The columns of one row that describe the pair of per subject arrays (first, second)."""
     d = first - second
-    low, high = bootstrap_ci(d, indices, level)
+    low, high = bootstrap_ci(d, indices, ci)
     return {"n": len(d), "mean_first": first.mean(), "mean_second": second.mean(),
             "mean_diff": d.mean(), "median_diff": float(pd.Series(d).median()),
-            "ci_low": low, "ci_high": high, "ci_level": round(level * 100),
+            "ci_low": low, "ci_high": high, "ci_level": round(ci * 100),
             "n_nonzero": int((d != 0).sum())}
 
 
@@ -246,6 +274,155 @@ def h2_rows(means, metric, region, indices):
     return rows
 
 
+def scored_row(family, wide, region, level, comparison, indices, ci=0.95, test=True):
+    """One Dice row of summary.csv outside H2. p_holm stays blank, and test=False leaves the
+    Wilcoxon columns blank too, for a row that reports no test."""
+    name, a, b = comparison
+    first, second = primary_score(wide, a, level), primary_score(wide, b, level)
+    row = dict.fromkeys(SUMMARY_COLUMNS) | {
+        "family": family, "metric": "dice", "region": region, "level": level, "comparison": name,
+        **paired(first, second, indices, ci)}
+    if test:
+        row["wilcoxon_stat"], row["p_raw"] = paired_wilcoxon(first - second)
+    return row
+
+
+def h3_rows(means, region, indices):
+    """The 2 H3 rows of one region: Dice at pattern 1, one 95% CI (AC-14)."""
+    wide = wide_tables(means, "dice", region)
+    return [scored_row("H3", wide, region, COMPLETE, c, indices) for c in H3_LINES.values()]
+
+
+def h4_rows(means, region, indices):
+    """The 2 H4 rows of one region: E3b-E3 at pattern 1, then on the primary score, whose 90% CI
+    gives the lower bound of AC-15."""
+    wide = wide_tables(means, "dice", region)
+    return [scored_row("H4", wide, region, COMPLETE, EXPOSURE, indices),
+            scored_row("H4", wide, region, PRIMARY, EXPOSURE, indices, ci=0.90)]
+
+
+def descriptive_row(means, region, indices):
+    """E3b-E1 at pattern 1: its 95% CI only, no test and no verdict (AC-15)."""
+    return scored_row("descriptive", wide_tables(means, "dice", region), region, COMPLETE,
+                      EXPOSURE_E1, indices, test=False)
+
+
+def summary_rows(means, indices):
+    """Every summary.csv row, in the order of Output schemas."""
+    return ([r for m in METRICS for g in REGIONS for r in h2_rows(means, m, g, indices)]
+            + [r for g in REGIONS for r in h3_rows(means, g, indices)]
+            + [r for g in REGIONS for r in h4_rows(means, g, indices)]
+            + [descriptive_row(means, g, indices) for g in REGIONS])
+
+
+def pattern_rows(means, metric, region, indices):
+    """The 60 patterns.csv rows of one (metric, region), on the averaged values, with Holm over the
+    15 patterns of each comparison. Secondary, so pattern 1 differs from H3 by design."""
+    wide = wide_tables(means, metric, region)
+    tests = {name: {p: paired_wilcoxon(wide[a][p].to_numpy() - wide[b][p].to_numpy())
+                    for p in PATTERNS} for name, a, b in PATTERN_COMPARISONS}
+    adjusted = {name: dict(zip(by_pattern, holm([p for _, p in by_pattern.values()]), strict=True))
+                for name, by_pattern in tests.items()}
+    rows = []
+    for p in PATTERNS:
+        for name, a, b in PATTERN_COMPARISONS:
+            first, second = wide[a][p].to_numpy(), wide[b][p].to_numpy()
+            pair = paired(first, second, indices)
+            del pair["ci_level"]
+            rows.append(dict.fromkeys(PATTERN_COLUMNS) | pair | {
+                "metric": metric, "region": region, "pattern_id": p,
+                "pattern_name": PATTERNS[p].name, "comparison": name,
+                "median_first": float(pd.Series(first).median()),
+                "median_second": float(pd.Series(second).median()),
+                "wilcoxon_stat": tests[name][p][0], "p_raw": tests[name][p][1],
+                "p_holm": adjusted[name][p]})
+    return rows
+
+
+def per_seed_rows(frames):
+    """The per_seed.csv rows: each seed on its own, with no p value (AC-12)."""
+    rows = []
+    for seed in SEEDS:
+        one_seed = {arm: frames[arm, seed] for arm in ARMS}
+        for metric in METRICS:
+            for region in REGIONS:
+                wide = wide_tables(one_seed, metric, region)
+                for level in (PRIMARY, COMPLETE):
+                    for name, a, b in SEED_COMPARISONS:
+                        d = primary_score(wide, a, level) - primary_score(wide, b, level)
+                        rows.append({"seed": seed, "metric": metric, "region": region,
+                                     "level": level, "comparison": name,
+                                     "mean_diff": float(d.mean()),
+                                     "median_diff": float(pd.Series(d).median())})
+    return rows
+
+
+def volume_rows(frames):
+    """The volume.csv rows: predicted minus true WT volume per arm, seed and pattern, computed for
+    each seed separately, with limits of agreement. Descriptive, no test (AC-16)."""
+    rows = []
+    for arm, seed in slots():
+        df = frames[arm, seed]
+        wt = df[df["region"] == VOLUME_REGION].sort_values("case")
+        for p, pattern in PATTERNS.items():
+            d = wt[wt["pattern_id"] == p]
+            diff = (d["pred_ml"] - d["true_ml"]).to_numpy()
+            mean, sd = float(diff.mean()), float(diff.std(ddof=1))
+            rows.append({"arm": ARM_NAMES[arm], "seed": seed, "pattern_id": p,
+                         "pattern_name": pattern.name, "n": len(diff), "mean_diff_ml": mean,
+                         "loa_low_ml": mean - 1.96 * sd, "loa_high_ml": mean + 1.96 * sd})
+    return rows
+
+
+def cost_label(ci_low, ci_high, margin=EQUIV_MARGIN):
+    """The label of AC-14, on unrounded bounds, with strict comparisons, in the spec's order."""
+    if -margin < ci_low and ci_high < margin:
+        return "equivalent"
+    if ci_high < 0:
+        return "cost"
+    if ci_low > 0:
+        return "gain"
+    return "inconclusive"
+
+
+def seeds_agree(per_seed, region, name, mean_diff):
+    """How many seeds have a Dice mean_diff at pattern 1 of the same sign as the averaged one."""
+    return sum(np.sign(r["mean_diff"]) == np.sign(mean_diff) for r in per_seed
+               if (r["metric"], r["region"], r["level"], r["comparison"])
+               == ("dice", region, COMPLETE, name))
+
+
+def h3_verdict(summary, per_seed):
+    """The six H3 lines (AC-14, AC-18). The p value is reported, and never changes the label."""
+    rows = {(r["region"], r["comparison"]): r for r in summary if r["family"] == "H3"}
+    lines = []
+    for h, (name, _, _) in H3_LINES.items():
+        for g in REGIONS:
+            r = rows[g, name]
+            low, high = r["ci_low"], r["ci_high"]
+            agree = seeds_agree(per_seed, g, name, r["mean_diff"])
+            lines.append(f"{h} {g}: {cost_label(low, high)} ({name}, "
+                         f"mean_diff={r['mean_diff']:+.6f}, median_diff={r['median_diff']:+.6f}, "
+                         f"ci=[{low:+.6f}, {high:+.6f}], "
+                         f"min_margin={max(abs(low), abs(high)):.6f}, "
+                         f"seeds_agree={agree}/{len(SEEDS)}, p_raw={r['p_raw']:.6g})")
+    return lines
+
+
+def h4_verdict(summary, alpha):
+    """The three H4 lines. Both parts must hold, so no Holm correction is used (AC-15)."""
+    rows = {(r["region"], r["level"]): r for r in summary if r["family"] == "H4"}
+    lines = []
+    for g in REGIONS:
+        c, primary = rows[g, COMPLETE], rows[g, PRIMARY]
+        gain = c["mean_diff"] > 0 and c["median_diff"] > 0 and c["p_raw"] < alpha
+        word = "supported" if gain and primary["ci_low"] > -EQUIV_MARGIN else "not supported"
+        lines.append(f"H4 {g}: {word} ({EXPOSURE[0]}, complete_mean_diff={c['mean_diff']:+.6f}, "
+                     f"complete_median_diff={c['median_diff']:+.6f}, "
+                     f"complete_p={c['p_raw']:.6g}, primary_ci90_low={primary['ci_low']:+.6f})")
+    return lines
+
+
 def h2_verdict(summary, alpha):
     """The nine H2 lines, on unrounded numbers, with the rule of spec 0005 (AC-13)."""
     primary = {(r["region"], r["comparison"]): r for r in summary
@@ -262,7 +439,7 @@ def h2_verdict(summary, alpha):
 
 def non_finite(rows):
     """AC-11: every number that goes out must be finite. Returns error strings."""
-    return [f"{r['family']} {r['metric']} {r['region']} {r['level']} {r['comparison']}: {k} is {v}"
+    return [" ".join(str(x) for x in r.values() if isinstance(x, str)) + f": {k} is {v}"
             for r in rows for k, v in r.items()
             if isinstance(v, (float, np.floating)) and not np.isfinite(v)]
 
@@ -283,24 +460,67 @@ def write_csv(path, columns, rows):
         w.writerows({k: cell(k, v) for k, v in r.items()} for r in rows)
 
 
+def compare_hash():
+    """sha256 over the bytes of SEALED_FILES, in that order (AC-28)."""
+    h = hashlib.sha256()
+    for name in SEALED_FILES:
+        h.update((Path(__file__).resolve().parents[2] / name).read_bytes())
+    return h.hexdigest()
+
+
+def folder_problems(folder, rerun_reason):
+    """AC-17: only a finished folder may be replaced, and only with a reason."""
+    if not folder.exists():
+        return [f"--rerun-reason replaces a finished folder, and {folder} is not one"
+                ] if rerun_reason else []
+    if not (folder / "run.json").is_file() or load_run(folder).get("status") != "ok":
+        return [f"{folder} exists but is not finished: look at it, then move it by hand"]
+    return [] if rerun_reason else [f"{folder} is finished; give --rerun-reason to replace it"]
+
+
 def guards(a):
-    """Every failed rule of AC-10. Returns (errors, eval folders, eval records, frames)."""
+    """Every failed rule of AC-10 and AC-17. Returns (errors, run records, eval folders, eval
+    records, frames)."""
     if a.fold == "test":
-        return ["--fold test is not built yet: it comes with spec 0006, build step 6"], {}, {}, {}
+        return (["--fold test is not built yet: it comes with spec 0006, build step 6"],
+                {}, {}, {}, {})
     errors, run_dirs = manifest_problems(a.runs, a.root)
     if len(run_dirs) != len(slots()):
-        return errors, {}, {}, {}
+        return errors, {}, {}, {}, {}
     more, run_recs = run_problems(run_dirs)
     errors += more
     if not run_recs:
-        return errors, {}, {}, {}
+        return errors, {}, {}, {}, {}
     eval_dirs = {slot: a.evals / f"{rec.get('run_id')}-{a.fold}" for slot, rec in run_recs.items()}
     more, eval_recs, frames = eval_problems(eval_dirs, run_dirs, a.fold)
     errors += more
-    final = a.out / f"compare-{a.fold}"
-    if final.exists():
-        errors.append(f"{final} exists: look at it, then move it by hand")
-    return errors, eval_dirs, eval_recs, frames
+    errors += folder_problems(a.out / f"compare-{a.fold}", a.rerun_reason)
+    return errors, run_recs, eval_dirs, eval_recs, frames
+
+
+def slot_key(slot):
+    return f"{slot[0]}_seed{slot[1]}"
+
+
+def run_record(a, run_recs, eval_recs, cfg, superseded):
+    """run.json of a finished compare, in the order of Output schemas, plus the two rerun fields
+    of AC-17, so a replaced folder keeps its reason."""
+    versions = [rec.get("versions") for rec in eval_recs.values()]
+    first = eval_recs[ARMS[0], SEEDS[0]]
+    commit, dirty = git_info()
+    record = {
+        "compare_id": f"compare-{a.fold}", "status": "ok", "fold": a.fold,
+        "n_cases": first["n_cases"],
+        "run_ids": {slot_key(s): rec["run_id"] for s, rec in run_recs.items()},
+        "eval_commits": {slot_key(s): rec["git_commit"] for s, rec in eval_recs.items()},
+        "versions_equal": all(v == versions[0] for v in versions),
+        "n_resumes": {slot_key(s): len(rec["resumes"]) for s, rec in run_recs.items()},
+        "seeds": list(SEEDS), "alpha": cfg["alpha"], "equiv_margin": EQUIV_MARGIN,
+        "compare_hash": compare_hash(), "protocol_hash": first["protocol_hash"],
+        "splits_sha256": first["splits_sha256"], "prereg_tag": PREREG_TAG, "git_commit": commit,
+        "git_dirty": dirty, "rerun_reason": a.rerun_reason, "superseded": superseded}
+    assert tuple(record) == RUN_JSON_KEYS
+    return record
 
 
 def main(argv=None):
@@ -310,8 +530,9 @@ def main(argv=None):
     ap.add_argument("--evals", type=Path, default=REPO / "results/0007-confirmation/evals")
     ap.add_argument("--out", type=Path, default=REPO / "results/0007-confirmation")
     ap.add_argument("--root", type=Path, default=REPO, help="the folder that holds results/")
+    ap.add_argument("--rerun-reason")
     a = ap.parse_args(argv)
-    errors, eval_dirs, eval_recs, frames = guards(a)
+    errors, run_recs, eval_dirs, eval_recs, frames = guards(a)
     if errors:
         for e in errors:
             print(f"ERROR: {e}")
@@ -323,21 +544,36 @@ def main(argv=None):
     # one index matrix per fold, with subjects sorted by case (AC-11)
     indices = bootstrap_indices(n_cases, cfg["bootstrap_resamples"], cfg["seed"])
     means = averaged(frames)
-    summary = [r for m in METRICS for g in REGIONS for r in h2_rows(means, m, g, indices)]
-    bad = non_finite(summary)
+    summary = summary_rows(means, indices)
+    keys = [(m, g) for m in METRICS for g in REGIONS]
+    patterns = [r for m, g in keys for r in pattern_rows(means, m, g, indices)]
+    per_seed = per_seed_rows(frames)
+    volume = volume_rows(frames)
+    bad = non_finite([*summary, *patterns, *per_seed, *volume])
     if bad:
         for e in bad:
             print(f"ERROR: {e}")
         return 2
-    lines = h2_verdict(summary, cfg["alpha"])
+    lines = [*h2_verdict(summary, cfg["alpha"]), *h3_verdict(summary, per_seed),
+             *h4_verdict(summary, cfg["alpha"])]
 
-    # built beside the final folder, so a crash leaves no half folder
+    # built beside the final folder, so a crash leaves no half folder and keeps a finished one
     final = a.out / f"compare-{a.fold}"
     partial = a.out / f".compare-{a.fold}.partial"
     shutil.rmtree(partial, ignore_errors=True)
     partial.mkdir(parents=True)
     write_csv(partial / "summary.csv", SUMMARY_COLUMNS, summary)
+    write_csv(partial / "patterns.csv", PATTERN_COLUMNS, patterns)
+    write_csv(partial / "per_seed.csv", PER_SEED_COLUMNS, per_seed)
+    write_csv(partial / "volume.csv", VOLUME_COLUMNS, volume)
     (partial / "verdict.txt").write_text("\n".join(lines) + "\n")
+    superseded = None
+    if final.exists():
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        superseded = f"{final.name}.superseded-{stamp}"
+        final.rename(final.with_name(superseded))
+    record = run_record(a, run_recs, eval_recs, cfg, superseded)
+    (partial / "run.json").write_text(json.dumps(record, indent=2))
     partial.rename(final)
     print("\n".join(lines))
     print(f"{n_cases} subjects, {len(SEEDS)} seeds -> {len(summary)} rows in {final}")
