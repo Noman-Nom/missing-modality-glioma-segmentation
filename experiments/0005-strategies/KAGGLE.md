@@ -1,14 +1,14 @@
 ```bash
 R1="20261103-023817-f9b3afb6"
-R3="fill in after step 1"
+R3="20261106-024450-10cfa2cc"
 R4="fill in after step 2"
 ```
 
 These three lines hold the run ids of E1, E3 and E4. `train.py` prints each id in its `run dir <path>` line. The id holds a time stamp, so nobody can know R3 and R4 in advance. Fill them in here as the runs finish. The lines work as they are in a shell and in a notebook cell.
 
-# Running E3 and E4 on Kaggle, and the joint test opening
+# Running E3 and E4 on Kaggle
 
-This file takes E3 and E4 from training through the one opening of the test fold (ADR 0002, spec 0005). All training and scoring runs on the Kaggle Tesla T4. The comparisons run on the laptop and use no GPU.
+This file takes E3 and E4 from training through the val comparison (ADR 0002, spec 0005). All training and scoring runs on the Kaggle Tesla T4. The comparisons run on the laptop and use no GPU.
 
 The steps depend on each other, so we recommend doing them in order:
 
@@ -18,14 +18,10 @@ The steps depend on each other, so we recommend doing them in order:
 | 2 | Kaggle | Train and score E4 | about 9.3 h |
 | 3 | Laptop | Copy back and check again | none |
 | 4 | Laptop | Val comparison | none |
-| 5 | Laptop | Pin the commit | none |
-| 6 | Laptop | Upload the joint tar | none |
-| 7 | Kaggle | The test opening, E1, E3 and E4 | about 6.3 h |
-| 8 | Laptop | Tables, verdict, the record | none |
 
-In all, about 25 h. These times come from E1 and E2, which is the only measuring done so far: about 8.2 h for a whole training notebook, 1.1 h for a val sweep, and 2.1 h for a test sweep. E3 and E4 are not measured yet. E4 has a few more weights, so its time may differ a little. The real timings land in each `run.json`.
+In all, about 19 h. These times come from E1 and E2, which is the only measuring done so far: about 8.2 h for a whole training notebook, 1.1 h for a val sweep, and 2.1 h for a test sweep. E3 and E4 are not measured yet. E4 has a few more weights, so its time may differ a little. The real timings land in each `run.json`.
 
-**Steps 1 to 6 never read a test case. Step 7 does, and it cannot be taken back.**
+**No step here reads a test case.**
 
 ## Before you start
 
@@ -167,145 +163,16 @@ done
 
 ## Step 4: the val comparison (laptop, no GPU)
 
+Spec 0006 changes this step in two ways. Do not run it before `prereg-v1` is tagged, or the tag message must say so (AC-8). And `compare.py` now refuses eval folders scored before the volume columns were added (AC-7).
+
 ```bash
 uv run python experiments/0005-strategies/compare.py --e1-run results/0003-baseline/$R1 --e3-run results/0005-strategies/runs/$R3 --e4-run results/0005-strategies/runs/$R4 --fold val
 uv run python experiments/0005-strategies/make_table.py --compare results/0005-strategies/compare-val
 cd writing/tracer && latexmk -xelatex e3e4-preview.tex
 ```
 
-These are development numbers. The captions say so, and the choice of method does not depend on them, because the comparison is fixed by the spec. `results/0005-strategies/compare-val/` must stay on the laptop: `compare.py --fold test` looks for it in step 8.
+These are development numbers. The captions say so, and the choice of method does not depend on them, because the comparison is fixed by the spec. `compare.py` stays for val only (spec 0006, AC-21).
 
-## Step 5: pin the commit (laptop)
+## The test path of this file is retired
 
-**Stop here for a moment.** Anything you want to add to the study has to be decided before step 7, and that includes more seeds, another dataset and another method.
-
-When you are ready:
-
-1. Record the val run in `context/progress-tracker.md`: the run ids, the check results and the real timings.
-2. Commit the tree, with `R3` and `R4` filled in at the top of this file. `results/` is git ignored, so this commit holds the code and the records, and the compare folder stays in `results/` on the laptop.
-3. Merge to `main`, push, and run `git rev-parse HEAD`. That full commit is the `COMMIT` of step 7.
-4. Check `git status --short` shows nothing tracked as changed. The test gate refuses a dirty tree.
-
-After this point, do not change a file named in `PROTOCOL_FILES` or `PROTOCOL_SOURCES`, or any of the four files in `compare_hash`. The test gate and `compare.py --fold test` would refuse, and the way out is a logged rerun of val.
-
-## Step 6: upload the joint tar (laptop, once)
-
-The test notebook needs three run folders and three val evals, because the gate reads `<out>/<run id>-val`. They go up as one uncompressed tar with a name Kaggle does not recognise, the same way as the BraTS data. The staging folder sits outside the upload folder, because `kaggle datasets create` uploads what it finds there.
-
-```bash
-cd /media/noman/E0948A169489EF7A/qarar-research
-STAGE=../kaggle-joint-stage
-mkdir -p ../kaggle-joint-test $STAGE/evals-e1 $STAGE/evals
-for RUN in results/0003-baseline/$R1 results/0005-strategies/runs/$R3 results/0005-strategies/runs/$R4; do
-  KEEP=$STAGE/runs/$(basename $RUN)
-  mkdir -p $KEEP/checkpoints
-  cp $RUN/config.toml $RUN/run.json $RUN/metrics_val.csv $KEEP/
-  cp $RUN/checkpoints/best.pt $KEEP/checkpoints/
-done
-cp -r results/0004-missing-eval/$R1-val $STAGE/evals-e1/
-cp -r results/0005-strategies/evals/$R3-val results/0005-strategies/evals/$R4-val $STAGE/evals/
-tar -cf ../kaggle-joint-test/joint-test.tar.bin -C $STAGE runs evals-e1 evals
-stat -c %s ../kaggle-joint-test/joint-test.tar.bin   # write this number in data/DATA.md
-kaggle datasets init -p ../kaggle-joint-test         # then set title and id (muhammadnomanned/brats-joint-test)
-kaggle datasets create -p ../kaggle-joint-test       # private unless you pass --public; never do that
-```
-
-## Step 7: the test opening (one Save & Run All)
-
-This is the one opening of the test fold. Before you click, we recommend reading the whole step, and checking that steps 1 to 6 all passed. If the gate refuses, nothing has been read. Bring the message to the main chat, and change nothing by hand.
-
-Settings as before: **GPU T4 x2**, **Internet** on. **Add Input**: **brats-gli-train** and **brats-joint-test**.
-
-**Cell 1: code at the pinned commit**
-
-Use cell 1 from step 1, with the `COMMIT` of step 5, and leave out the `NAME` line. Then add the three lines from the top of this file, in a cell of their own.
-
-**Cell 2: unpack the data and the joint tar**
-
-`/kaggle/input` is read only, and the sweep writes beside the val eval, so the tar goes into `/kaggle/working/joint/`:
-
-```python
-JOINT = "/kaggle/working/joint"
-DATA_TAR = glob.glob("/kaggle/input/**/brats-gli-train.tar.bin", recursive=True)[0]
-JOINT_TAR = glob.glob("/kaggle/input/**/joint-test.tar.bin", recursive=True)[0]
-!mkdir -p /tmp/brats {JOINT}
-!tar -xf {DATA_TAR} -C /tmp/brats
-!tar -xf {JOINT_TAR} -C {JOINT}
-!ls /tmp/brats/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData | wc -l
-!ls {JOINT}/runs {JOINT}/evals-e1 {JOINT}/evals
-```
-
-The count must be **1251**, and you should see the three run ids and three val evals.
-
-**Cell 3: the test cache and its check (about 7.5 GB)**
-
-```python
-sh("uv run python experiments/0003-baseline/preprocess.py --folds test")
-sh("uv run python experiments/0003-baseline/preprocess.py --verify")
-```
-
-The last line must read `verify ok: 255 files, 0 problem(s)`. The cache holds all 255 test cases, and the sweep scores 228 of them, one per subject. The settings are E1's, so the preprocess hash stays the same.
-
-**Cell 4: the three sweeps, E1 first**
-
-```python
-OUTS = {R1: f"{JOINT}/evals-e1", R3: f"{JOINT}/evals", R4: f"{JOINT}/evals"}
-for R, OUT in OUTS.items():
-    if not finished(f"{OUT}/{R}-test"):
-        sh(f"uv run python experiments/0004-missing-eval/evaluate.py --run {JOINT}/runs/{R} --fold test --open-test --out {OUT}")
-```
-
-**Cell 5: the checks**
-
-```python
-for R, OUT in OUTS.items():
-    sh(f"uv run python experiments/0004-missing-eval/check_eval.py {OUT}/{R}-test")
-```
-
-**When the version finishes:** paste back into the main chat the last 2 lines of each command, plus the `nvidia-smi` line and the `git log` line. Then download the **Output**.
-
-### After a session dies
-
-A resume across sessions is normal (spec 0004, AC-5). The same `evaluate.py` command resumes: it cuts `metrics.csv` back to its last whole pair, skips the finished pairs, and adds an entry to `resumes` in `run.json`.
-
-1. Make a new notebook (or a new version) with the same settings and inputs. Also **Add Input**: the dead version's **Output**.
-2. Keep the **same `COMMIT`**. Run cell 1.
-3. In cell 2, replace the `!tar -xf {JOINT_TAR} -C {JOINT}` line and the `mkdir` of `{JOINT}` with this, so the partial `metrics.csv` comes back:
-
-```python
-import shutil
-OLD = sorted(glob.glob("/kaggle/input/**/joint/", recursive=True))[-1]
-shutil.copytree(OLD, JOINT)
-```
-
-4. Run cells 3 to 5 as they are. Cell 4 skips a sweep that finished.
-
-A resume stops with exit 2 if the commit, the config, `protocol_hash`, the source run, the `device` or the `gpu` differs. If that happens because the session got another accelerator, set it back to the T4 and run again. Never delete a folder, and never start a test sweep over without a logged reason.
-
-## Step 8: after the opening (laptop, no GPU)
-
-Copy E1's test eval to `results/0004-missing-eval/`, and E3's and E4's to `results/0005-strategies/evals/`, keeping every file. The laptop must be at a commit with the same `data/splits/splits.csv`.
-
-The RQ1 numbers, from the E1 test eval only:
-
-```bash
-uv run python experiments/0004-missing-eval/check_eval.py results/0004-missing-eval/$R1-test --run results/0003-baseline/$R1
-uv run python experiments/0004-missing-eval/analyse.py --eval results/0004-missing-eval/$R1-test
-uv run python experiments/0004-missing-eval/make_table.py --eval results/0004-missing-eval/$R1-test
-```
-
-The RQ2 comparison:
-
-```bash
-for R in $R3 $R4; do
-  uv run python experiments/0004-missing-eval/check_eval.py results/0005-strategies/evals/$R-test --run results/0005-strategies/runs/$R
-done
-uv run python experiments/0005-strategies/compare.py --e1-run results/0003-baseline/$R1 --e3-run results/0005-strategies/runs/$R3 --e4-run results/0005-strategies/runs/$R4 --fold test
-uv run python experiments/0005-strategies/make_table.py --compare results/0005-strategies/compare-test
-```
-
-`compare.py` refuses if `compare-val` is missing, names other runs, or has a different `compare_hash`. If `versions` differ, it warns and writes anyway, with `versions_equal` false, because a test opening cannot be taken back.
-
-Then record the opening by hand in `context/progress-tracker.md`: the date, the commit and the three eval ids.
-
-**No threshold, pattern, region, metric or test changes after this. A number that disappoints stays in the thesis.**
+Spec 0006 (AC-21) replaced steps 5 to 8, which were the joint test opening of E1, E3 and E4. The test fold is opened once, for all 12 models of the confirmation study, and those steps live in `experiments/0007-confirmation/KAGGLE.md`. This file opens no test.

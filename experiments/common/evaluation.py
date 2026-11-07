@@ -10,6 +10,7 @@ import inspect
 import math
 import os
 import statistics
+import subprocess
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -62,6 +63,12 @@ RESUME_KEYS = ("git_commit", "config_hash", "protocol_hash", "source_run_id",
 VAL_MATCH_KEYS = ("protocol_hash", "config_hash", "source_best_iteration", "source_best_sha256",
                   "splits_sha256")
 PREREG_TAG = "prereg-v1"  # the current protocol tag, moved only by spec 0006, AC-31
+# the human's literature check, one `key: value` line each, as a path inside the repo (AC-19)
+LITERATURE_GATE = "docs/literature/test-gate.md"
+GATE_FILE = REPO / LITERATURE_GATE
+GATE_KEYS = ("status", "date", "papers_read", "cai_status", "citation_search")
+MIN_PAPERS_READ = 50
+COMPARE_VAL = REPO / "results" / "0007-confirmation" / "compare-val"  # spec 0006, AC-27
 MAX_MEAN_DICE_DIFF = 0.001  # AC-9, per region
 MAX_CASE_DICE_DIFF = 0.01  # AC-9, per (case, region)
 
@@ -316,14 +323,63 @@ def check_rules(eval_dir, source_run):
     return errors
 
 
+def gate_problems(text):
+    """Every failed rule of the literature gate (spec 0006, AC-19), given the text of the gate
+    file. A repeated key is refused, so a later line cannot quietly change an earlier one."""
+    found = {}
+    for line in text.splitlines():
+        key, colon, value = line.partition(":")
+        if colon and key.strip() in GATE_KEYS:
+            found.setdefault(key.strip(), []).append(value.strip())
+    errors = [f"literature gate: no {k}" for k in GATE_KEYS if not any(found.get(k, []))]
+    errors += [f"literature gate: {k} appears {len(v)} times" for k, v in found.items()
+               if len(v) > 1]
+    if errors:
+        return errors
+    if found["status"][0] != "pass":
+        errors.append(f"literature gate: status is {found['status'][0]!r}, not 'pass'")
+    papers = found["papers_read"][0]
+    if not papers.isascii() or not papers.isdigit():
+        errors.append(f"literature gate: papers_read is {papers!r}, not a whole number")
+    elif int(papers) < MIN_PAPERS_READ:
+        errors.append(f"literature gate: papers_read is {papers}, below {MIN_PAPERS_READ}")
+    return errors
+
+
+def descends_from_tag(commit, tag, repo):
+    """True if commit holds the tag. An unknown tag or an unknown commit gives False."""
+    r = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", f"refs/tags/{tag}",
+                        str(commit)], capture_output=True, check=False)
+    return r.returncode == 0
+
+
+def opening_problems(run_id, commit):
+    """The rules of the one test opening (spec 0006, AC-27), as error strings: the literature
+    gate passes, the protocol tag is an ancestor of this commit, and the val compare finished and
+    lists this run. Reads no case."""
+    errors = (gate_problems(GATE_FILE.read_text(encoding="utf-8")) if GATE_FILE.is_file()
+              else [f"{GATE_FILE} missing: the literature gate has not passed"])
+    if not descends_from_tag(commit, PREREG_TAG, REPO):
+        errors.append(f"commit {commit} does not descend from {PREREG_TAG}")
+    if not (COMPARE_VAL / "run.json").is_file():
+        return errors + [f"{COMPARE_VAL} missing: run compare_seeds.py --fold val first"]
+    compare = load_run(COMPARE_VAL)
+    if compare.get("status") != "ok":
+        errors.append(f"val compare: status is {compare.get('status')!r}, not 'ok'")
+    if run_id not in compare.get("run_ids", {}).values():
+        errors.append(f"val compare does not list run {run_id}")
+    return errors
+
+
 def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol, config):
     """Every failed rule of the test gate (AC-7), as error strings. Empty means the gate is open.
 
     rec is the E1 run.json and git is (commit, dirty) from git_info(). config is the config_hash
     of this run: protocol seals only the default config.toml, so --config needs its own check.
-    source_pins() checks that the weights and the split file are still the ones val scored. It
-    takes plain values, so E3 and E4 can reuse it. It reads no case. It stops accidents; it is not
-    proof of one opening.
+    source_pins() checks that the weights and the split file are still the ones val scored, and
+    opening_problems() adds the rules of spec 0006. Every model passes through here, so the
+    preflight of compare_seeds.py runs these same rules. It reads no case. It stops accidents; it
+    is not proof of one opening.
     """
     if fold != "test":
         return ["--open-test is only for --fold test"] if open_test else []
@@ -336,6 +392,7 @@ def check_test_gate(fold, open_test, quick, rec, git, val_dir, run_dir, protocol
         errors.append(f"git_dirty is {git[1]!r}, must be False: commit first")
     if rec["quick"] is not False:
         errors.append("the E1 run is a quick run")
+    errors += opening_problems(rec["run_id"], git[0])
     val_dir = Path(val_dir)
     if not (val_dir / "run.json").is_file():
         return errors + [f"{val_dir} missing: finish the val eval first"]

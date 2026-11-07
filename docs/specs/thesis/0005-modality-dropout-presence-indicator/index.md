@@ -28,7 +28,7 @@ E3 and E4 retrain the E1 model with the same data, budget and seed, and change o
 - **AC-8 Selection.** `best.pt` is chosen exactly as in E1: mean of the WT, TC and ET val Dice at pattern 1, tie keeps the earlier point, `val_patterns` stays `(1,)`. `selection_score` is not changed.
 - **AC-9 Tie out file.** `experiments/0003-baseline/evaluate.py` applies `strategy_hooks(cfg)["image_hook"]` after `apply_pattern()` and is run on each E3 and E4 run, on the T4, so each has the `metrics_val.csv` that `_tie_out()` needs. For E1 the hook changes nothing: at build time, `metrics_val.csv` of a quick E1 run is byte equal between the commit before this feature and the one after it. It still never reads the test fold.
 - **AC-10 One sweep.** `experiments/0004-missing-eval/evaluate.py` passes `image_hook=strategy_hooks(cfg)["image_hook"]` to `sweep()`, with `cfg` from the source run's `config.toml`. E3 and E4 evals use `--out results/0005-strategies/evals`. E1 keeps `results/0004-missing-eval`. All three use the default `experiments/0004-missing-eval/config.toml`.
-- **AC-11 The seal holds.** No file or source named in `PROTOCOL_FILES` or `PROTOCOL_SOURCES` changes, nor `MODALITIES`, `REGIONS` or `REGION_LABELS`. A test asserts `protocol_hash()` equals `146635cf4521a239c4e8cba877528b4c688a6410cd3b817df671db4f1f57825b`, the value in the finished E1 val eval, so the E1 val eval stays valid and is not rerun.
+- **AC-11 The seal holds.** No file or source named in `PROTOCOL_FILES` or `PROTOCOL_SOURCES` changes, nor `MODALITIES`, `REGIONS` or `REGION_LABELS`. A test asserts `protocol_hash()` equals `146635cf4521a239c4e8cba877528b4c688a6410cd3b817df671db4f1f57825b`, the value in the finished E1 val eval, so the E1 val eval stays valid and is not rerun. *Note 2026-11-07 (spec 0006, AC-7: amended. `common/evaluation.py` gained the volume columns and the rules of the test opening, so `protocol_hash()` moved and the pinned value in this criterion no longer holds. The current pin is in `SEALED_HASH`, and spec 0006 scores all 12 val evals again into `results/0007-confirmation/evals/`. The old eval folders stay as proof, and now fail `check_rules`, because they have no volume columns.)*
 
 *Checks and runs*
 
@@ -46,8 +46,8 @@ E3 and E4 retrain the E1 model with the same data, budget and seed, and change o
 
 *Joint test opening*
 
-- **AC-20 Order.** Each of these happens before the next starts: E3 and E4 val evals pass `check_eval.py`; `compare.py --fold val` passes; the val compare folder is copied into the repo and the tree is committed; that commit is pinned; `preprocess.py --folds test` runs on the T4; then `evaluate.py --fold test --open-test` runs for E1, E3 and E4 from that commit. This order is a written step in `KAGGLE.md`, and `compare.py --fold test` enforces what it can (AC-16). A resume across Kaggle sessions is normal (spec 0004, AC-5).
-- **AC-21 After the opening.** On test the human runs `check_eval.py` for each of the three, `analyse.py` and `make_table.py` on the E1 test eval only (the RQ1 numbers), then `compare.py --fold test` and `make_table.py --compare`. The opening is recorded by hand in `context/progress-tracker.md` with date, commit and the three eval ids. No threshold, pattern, region, metric, or test changes after that. A number that disappoints stays in the thesis.
+- **AC-20 Order.** Each of these happens before the next starts: E3 and E4 val evals pass `check_eval.py`; `compare.py --fold val` passes; the val compare folder is copied into the repo and the tree is committed; that commit is pinned; `preprocess.py --folds test` runs on the T4; then `evaluate.py --fold test --open-test` runs for E1, E3 and E4 from that commit. This order is a written step in `KAGGLE.md`, and `compare.py --fold test` enforces what it can (AC-16). A resume across Kaggle sessions is normal (spec 0004, AC-5). *Note 2026-11-07 (spec 0006, AC-21: retired. This joint test opening does not run. The order is now spec 0006, AC-20, for all 12 models.)*
+- **AC-21 After the opening.** On test the human runs `check_eval.py` for each of the three, `analyse.py` and `make_table.py` on the E1 test eval only (the RQ1 numbers), then `compare.py --fold test` and `make_table.py --compare`. The opening is recorded by hand in `context/progress-tracker.md` with date, commit and the three eval ids. No threshold, pattern, region, metric, or test changes after that. A number that disappoints stays in the thesis. *Note 2026-11-07 (spec 0006, AC-21: retired. The steps after the opening are now spec 0006, AC-22, and the RQ1 steps are its AC-30. `0005-strategies/compare.py` stays unchanged, for val only.)*
 
 *Records*
 
@@ -204,7 +204,7 @@ The feature moves through these steps, each needing the one before: E3 and E4 tr
 ### Key invariants
 
 - E1, E3 and E4 share subjects, splits, iterations, selection rule, sweep, metrics and statistics, and patches at a given seed up to a run's first resume. The strategy is the only intended difference. Model init does not move patches, because the loader has its own generator.
-- E1 is never retrained or rescored on val for this feature.
+- E1 is never retrained or rescored on val for this feature. *Note 2026-11-07 (spec 0006, AC-7: amended. Seed 42 of E1 is rescored on val with the volume columns, and its old scores must match within the limits of spec 0006, AC-26. It is still not retrained.)*
 - Every sealed file stays byte equal (AC-11).
 - A missing channel is the same exact zero in training, in val and in the sweep.
 - E3 and E4 are scored through the same `predict()`, `apply_pattern()` and `sweep()` as E1.

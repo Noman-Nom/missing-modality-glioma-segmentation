@@ -108,13 +108,17 @@ Milestones 1 to 3 of 5 built 2026-11-06 on branch `feat/e3-e4-strategies` (build
 `0006-literature/fetch_papers.py`, built 2026-11-07: `search` asks OpenAlex and logs to `docs/literature/search-log.csv` and `candidates.csv`; `download` keeps real open access PDFs in `~/literature-pdfs`, outside git, with a text copy. Closed papers get `no_open_copy`, for the human. Toy tests in `tests/test_fetch_papers.py`, plus one live trial in a scratch folder. No paper has been reviewed yet.
 
 ## L. Confirmation study (spec 0006, in progress)
-Built 2026-11-07, milestones 1 and 2 of 5. Toy folders only, no number here is a result.
+Built 2026-11-07, milestones 1 to 3 of 5. Toy folders only, no number here is a result.
 - E3b arm: `draw_exposure_patterns`, `exposure_hook` and `expected_draw_counts` in `common/strategies.py`, config `0007-confirmation/e3b.toml`. `strategy_problems` guards `complete_share`. Fixed expected values prove the old draws of E3 and E4 did not change (AC-3).
-- `0007-confirmation/compare_seeds.py`: every AC-10 guard, then the mean over 3 seeds per subject, region and pattern, then the 72 H2 rows and 9 H2 lines. A test proves 3 identical seeds give the lines of `0005-strategies/compare.py`. `--fold test` refuses until build step 6.
+- `0007-confirmation/compare_seeds.py`: every AC-10 guard, then the mean over 3 seeds per subject, region and pattern, then the 72 H2 rows and 9 H2 lines. A test proves 3 identical seeds give the lines of `0005-strategies/compare.py`.
 - Same script, milestone 2: H3 cost labels (`equivalent`, `cost`, `gain`, `inconclusive`, margin 0.015), H4 exposure lines, 18 verdict lines, 87 rows in `summary.csv`, plus `patterns.csv` (360 rows), `per_seed.csv` (180), `volume.csv` (180) and `run.json` with `compare_hash`. A finished folder needs `--rerun-reason`. The row `E3b-E1` holds a CI and no test, as AC-15 asks for no more.
 - Volume: `pred_ml` and `true_ml` are the last two columns of `metrics.csv`, computed by `volume_ml` in `sweep`, and `check_rules` guards them (AC-7).
 - `0007-confirmation/check_confirmation.py`: only `rescore_problems` so far (AC-26), no command yet.
 - `0007-confirmation/make_table.py`: the 7 table files. Labels come from `verdict.txt`, so it decides nothing. The toy tables compiled once with XeLaTeX by hand. `-seeds.tex` and `-volume.tex` use `longtable`.
 - `0007-confirmation/runs.toml`: the manifest, with seed 42 of E1 and E3 filled in.
-- Seal: `PREREG_TAG` lives in a sealed file, so `protocol_hash()` is now `0bc76bfa...`, pinned in `SEALED_HASH` and `EXPECTED_PROTOCOL_HASH`, and a test keeps the two equal. The tag commit holds the final pin.
-- Not built yet: the test path, the rest of `check_confirmation.py`, `KAGGLE.md`.
+- Seal: `PREREG_TAG` lives in a sealed file, so `protocol_hash()` is now `fa903bff...`, pinned in `SEALED_HASH` and `EXPECTED_PROTOCOL_HASH`, and a test keeps the two equal. The tag commit holds the final pin.
+- Test path, milestone 3: `check_test_gate` in `common/evaluation.py` also refuses unless `docs/literature/test-gate.md` passes (`gate_problems`, all five keys, each once, at least 50 papers), `PREREG_TAG` is an ancestor of the commit, and the val compare finished and lists this run (AC-19, AC-27). `compare_seeds.py --fold test --preflight` runs that same gate for all 12 models, the val evals, the val compare and the seal of this commit, and writes nothing (AC-20). `--fold test` adds `seal_problems`, which asks git about each eval commit, and `val_compare_problems` (AC-28). A test eval on disk stops the preflight (AC-31).
+- `0007-confirmation/rq1_seeds.py`: reads the `verdict.txt` of the 3 E1 test evals and says `agree` or `split` per H1 line (AC-30). Agree means the same word, so the pattern lists may differ.
+- `0007-confirmation/KAGGLE.md`: the test path half only: the order, the literature gate, the preflight, the RQ1 steps, the amendment path. `make_table.py` of E2 uses one file name per fold, so each E1 seed gets its own `--out-dir`.
+- Spec 0005: the steps of its joint test opening are gone from `0005-strategies/KAGGLE.md`, and dated notes in its spec point to spec 0006 (AC-7, AC-21). `0005-strategies/compare.py` is unchanged, pinned by a test.
+- Not built yet: the rest of `check_confirmation.py`, the training half of `KAGGLE.md`, the Kaggle notebook cells, the records of AC-25.

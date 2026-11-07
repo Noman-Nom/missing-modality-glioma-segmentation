@@ -15,9 +15,11 @@ from common.data import MODALITIES, REGION_LABELS, REGIONS
 from common.evaluation import (
     EVAL_RUN_KEYS,
     METRIC_COLUMNS,
+    PREREG_TAG,
     PROTOCOL_FILES,
     PROTOCOL_SOURCES,
     check_rules,
+    gate_problems,
     protocol_hash,
 )
 from common.missing import PATTERNS
@@ -26,6 +28,7 @@ from conftest import only_run, write_case, write_splits
 from scipy.stats import chi2
 
 REPO = Path(__file__).resolve().parents[1]
+GOOD_GATE = "status: pass\ndate: 2027-01-15\npapers_read: 50\ncai_status: x\ncitation_search: y\n"
 E1 = REPO / "experiments" / "0003-baseline"
 E2 = REPO / "experiments" / "0004-missing-eval"
 
@@ -1226,7 +1229,7 @@ def test_tie_out_refuses_one_case_off_with_the_mean_unchanged(broken):
     assert error.startswith("2 case Dice value(s) differ from E1")
 
 
-def test_tie_out_refuses_another_case_set(broken):
+def test_tie_out_refuses_another_case_set(broken, tmp_path):
     ev, run = broken
     edit_csv(run / "metrics_val.csv", lambda rows: rows[3:])
     assert any("case set differs" in e for e in check_rules(ev, run))
@@ -1238,6 +1241,15 @@ def run_test(run, out, *extra):
                           "--device", "cpu", *extra])
 
 
+def open_rules(monkeypatch, root):
+    """A clean git_info, and the rules of spec 0006 pointed at the files in root, all open. A test
+    below closes one."""
+    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    monkeypatch.setattr("common.evaluation.GATE_FILE", root / "test-gate.md")
+    monkeypatch.setattr("common.evaluation.COMPARE_VAL", root / "compare-val")
+    monkeypatch.setattr("common.evaluation.descends_from_tag", lambda *a: True)
+
+
 @pytest.fixture
 def gate(val_eval, e1_run, tmp_path, monkeypatch):
     """Everything open: a clean git_info and a good val eval. A test closes one rule. Any read of
@@ -1246,7 +1258,12 @@ def gate(val_eval, e1_run, tmp_path, monkeypatch):
     shutil.copytree(val_eval, out / val_eval.name)
     run = tmp_path / "e1"
     shutil.copytree(e1_run, run)
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    (tmp_path / "test-gate.md").write_text(GOOD_GATE)
+    compare = tmp_path / "compare-val"
+    compare.mkdir()
+    run_id = load_run(run)["run_id"]
+    (compare / "run.json").write_text(json.dumps({"status": "ok", "run_ids": {"e1": run_id}}))
+    open_rules(monkeypatch, tmp_path)
 
     def no_read(*a, **k):
         raise AssertionError("the test fold was read")
@@ -1261,6 +1278,81 @@ def assert_refused(run, out, message, capsys, *extra):
     assert run_test(run, out, *extra) == 2
     assert message in capsys.readouterr().out
     assert not list(out.glob("*-test*"))
+
+
+def gate_text(tmp_path):
+    return tmp_path / "test-gate.md"
+
+
+# covers: spec 0006, AC-19, AC-27
+@pytest.mark.parametrize(("text", "message"), [
+    (GOOD_GATE.replace("status: pass", "status: fail"), "status is 'fail'"),
+    (GOOD_GATE.replace("status: pass", "status: Pass"), "status is 'Pass'"),
+    (GOOD_GATE.replace("papers_read: 50", "papers_read: 49"), "papers_read is 49, below 50"),
+    (GOOD_GATE.replace("papers_read: 50", "papers_read: many"), "not a whole number"),
+    (GOOD_GATE.replace("cai_status: x\n", ""), "no cai_status"),
+    (GOOD_GATE.replace("citation_search: y", "citation_search:"), "no citation_search"),
+    (GOOD_GATE + "status: pass\n", "status appears 2 times"),
+])
+def test_gate_refuses_a_literature_gate_that_failed(gate, capsys, tmp_path, text, message):
+    out, _, run, _ = gate
+    gate_text(tmp_path).write_text(text)
+    assert_refused(run, out, message, capsys, "--open-test")
+
+
+def test_gate_refuses_no_literature_gate(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    gate_text(tmp_path).unlink()
+    assert_refused(run, out, "the literature gate has not passed", capsys, "--open-test")
+
+
+def test_literature_gate_passes_at_50_papers_with_extra_text():
+    assert gate_problems("# The gate\n\nSome note.\n" + GOOD_GATE) == []
+
+
+# covers: spec 0006, AC-27
+def test_gate_refuses_a_commit_outside_the_tag(gate, capsys):
+    out, _, run, monkeypatch = gate
+    monkeypatch.setattr("common.evaluation.descends_from_tag", lambda *a: False)
+    assert_refused(run, out, f"does not descend from {PREREG_TAG}", capsys, "--open-test")
+
+
+def test_gate_asks_git_with_the_real_commit_and_tag(gate, capsys):
+    out, _, run, monkeypatch = gate
+    seen = []
+    monkeypatch.setattr("common.evaluation.descends_from_tag",
+                        lambda *a: seen.append(a) is not None)
+    assert_refused(run, out, "does not descend", capsys, "--open-test")
+    assert seen[0][:2] == ("abc", PREREG_TAG)
+
+
+def test_gate_refuses_no_val_compare(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    shutil.rmtree(tmp_path / "compare-val")
+    assert_refused(run, out, "compare_seeds.py --fold val first", capsys, "--open-test")
+
+
+def test_gate_refuses_a_val_compare_that_did_not_finish(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    path = tmp_path / "compare-val" / "run.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"status": "running"}))
+    assert_refused(run, out, "val compare: status is 'running'", capsys, "--open-test")
+
+
+def test_gate_refuses_a_run_missing_from_the_val_compare(gate, capsys, tmp_path):
+    out, _, run, _ = gate
+    (tmp_path / "compare-val" / "run.json").write_text(
+        json.dumps({"status": "ok", "run_ids": {"e1_seed42": "another"}}))
+    assert_refused(run, out, "val compare does not list run", capsys, "--open-test")
+
+
+def test_gate_prints_a_failed_gate_with_no_val_eval(gate, capsys, tmp_path):
+    out, val_dir, run, _ = gate
+    gate_text(tmp_path).unlink()
+    shutil.rmtree(val_dir)
+    assert run_test(run, out, "--open-test") == 2
+    text = capsys.readouterr().out
+    assert "the literature gate has not passed" in text and "finish the val eval first" in text
 
 
 def test_gate_needs_open_test(gate, capsys):
@@ -1368,7 +1460,7 @@ def test_gate_refuses_a_missing_checkpoint(gate, capsys):
 def test_gate_opens_with_a_copy_of_the_config_val_used(gate, tmp_path):
     out, _, run, monkeypatch = gate
     monkeypatch.undo()
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    open_rules(monkeypatch, tmp_path)
     copy = tmp_path / "copy.toml"
     shutil.copy(E2 / "config.toml", copy)
     assert run_test(run, out, "--open-test", "--config", str(copy)) == 0
@@ -1379,7 +1471,7 @@ def test_gate_opens_with_a_copy_of_the_config_val_used(gate, tmp_path):
 def test_gate_opens_on_the_joint_tar_layout(gate, e1_run, tmp_path):
     _, val, run, monkeypatch = gate
     monkeypatch.undo()
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    open_rules(monkeypatch, tmp_path)
     joint = tmp_path / "joint"
     kept = joint / "runs" / e1_run.name
     (kept / "checkpoints").mkdir(parents=True)
@@ -1399,10 +1491,10 @@ def test_gate_refuses_open_test_on_val(gate, capsys):
     assert "only for --fold test" in capsys.readouterr().out
 
 
-def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys):
+def test_gate_open_scores_the_synthetic_test_fold_once(gate, e1_run, capsys, tmp_path):
     out, _, run, monkeypatch = gate
     monkeypatch.undo()
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    open_rules(monkeypatch, tmp_path)
     assert run_test(run, out, "--open-test") == 0
     folder = out / f"{e1_run.name}-test"
     rows = rows_of(folder / "metrics.csv")
@@ -1463,7 +1555,7 @@ def test_check_eval_passes_and_projects_the_test_time(val_eval, capsys):
 def test_gate_follows_the_config_val_used(gate, e1_run, tmp_path, capsys):
     out, _, run, monkeypatch = gate
     monkeypatch.undo()
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    open_rules(monkeypatch, tmp_path)
     cfg = load_config(E2 / "config.toml")
     other = tmp_path / "other.toml"
     dump_config(cfg | {"eval": cfg["eval"] | {"alpha": 0.5}}, other)
@@ -1474,10 +1566,10 @@ def test_gate_follows_the_config_val_used(gate, e1_run, tmp_path, capsys):
 
 # covers: AC-16. The test fold side of the empty eval rule: its case list is compared too, so a
 # test eval cut to nothing, n_cases included, is not a finished test eval.
-def test_rules_refuse_a_test_eval_that_scored_no_case(gate, e1_run):
+def test_rules_refuse_a_test_eval_that_scored_no_case(gate, e1_run, tmp_path):
     out, _, run, monkeypatch = gate
     monkeypatch.undo()
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    open_rules(monkeypatch, tmp_path)
     assert run_test(run, out, "--open-test") == 0
     folder = out / f"{e1_run.name}-test"
     (folder / "metrics.csv").write_text(",".join(METRIC_COLUMNS) + "\n")
@@ -1486,10 +1578,10 @@ def test_rules_refuse_a_test_eval_that_scored_no_case(gate, e1_run):
 
 
 # covers: AC-16. The projection is for a val eval; a finished test eval has nothing to project.
-def test_check_eval_prints_no_projection_on_test(gate, e1_run, capsys):
+def test_check_eval_prints_no_projection_on_test(gate, e1_run, capsys, tmp_path):
     out, _, run, monkeypatch = gate
     monkeypatch.undo()
-    monkeypatch.setattr(evaluate, "git_info", lambda: ("abc", False))
+    open_rules(monkeypatch, tmp_path)
     assert run_test(run, out, "--open-test") == 0
     capsys.readouterr()
     assert check_eval.main([str(out / f"{e1_run.name}-test"), "--run", str(run)]) == 0

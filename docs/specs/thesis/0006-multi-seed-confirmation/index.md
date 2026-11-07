@@ -214,7 +214,7 @@ Projection, from E1 and E3 timings, not a measurement. Whole notebooks fit about
 
 ## Follow-up
 
-- [ ] Add dated notes to spec 0005: this spec replaces its test path (AC-21), and amends its AC-11 and its rule that E1 is never rescored (AC-7).
+- [x] Add dated notes to spec 0005: this spec replaces its test path (AC-21), and amends its AC-11 and its rule that E1 is never rescored (AC-7).
 - [ ] Add scope feature for this spec, and move the joint test opening from feature 7 to it.
 - [ ] The human checks the publication status of Cai et al. on the journal sites and Google Scholar.
 - [ ] Update `writing/proposal/proposal.tex` and the RQ wording in `context/project-overview.md` for the new claim, then add Cai et al., Öchsner et al. and others to `writing/refs.bib` with verification.

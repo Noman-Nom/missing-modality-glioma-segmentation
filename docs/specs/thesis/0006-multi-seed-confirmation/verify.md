@@ -1,5 +1,5 @@
 # Verify: confirmation study · spec 0006 · updated 2026-11-07
-_Steps derived from spec 0006 acceptance criteria. `/check verify` runs these; `/test` locks the durable ones. This file covers milestone 1 (build steps 1 and 2). Later milestones add to it._
+_Steps derived from spec 0006 acceptance criteria. `/check verify` runs these; `/test` locks the durable ones. This file covers milestones 1 to 3. Later milestones add to it._
 
 ## Commands
 - [ ] `uv run pytest -q tests/test_common_strategies.py tests/test_confirmation_compare.py tests/test_strategy_runs.py tests/test_experiment_scripts.py` → all pass → AC-2, AC-3, AC-4, AC-9, AC-10, AC-11, AC-13
@@ -7,7 +7,7 @@ _Steps derived from spec 0006 acceptance criteria. `/check verify` runs these; `
 - [ ] `uv run python experiments/0003-baseline/train.py --config experiments/0007-confirmation/e3b.toml --quick --out <tmp>` → status ok, 4 input channels → AC-2
 - [ ] `uv run python experiments/0005-strategies/check_strategy.py <E3 run> --e1 results/0003-baseline/20261103-023817-f9b3afb6` → PASS, same draw counts per pattern as before this change → AC-3
 - [ ] `uv run python experiments/0007-confirmation/compare_seeds.py --runs experiments/0007-confirmation/runs.toml --fold val` on the real manifest today → exit 2, naming every empty slot, writes nothing → AC-9, AC-10
-- [ ] `uv run python experiments/0007-confirmation/compare_seeds.py --runs experiments/0007-confirmation/runs.toml --fold test` → exit 2, says build step 6 → AC-20
+- [ ] `uv run python experiments/0007-confirmation/compare_seeds.py --runs experiments/0007-confirmation/runs.toml --fold test` on the real manifest today → exit 2, naming every empty slot, writes nothing → AC-20
 
 ## Value sourcing
 - [ ] `complete_share`: change it in a copy of `e3b.toml` to 0.25 → share of complete draws in `expected_draw_counts` near a quarter, and `compare_seeds.py` refuses that run → AC-2, AC-10
@@ -37,3 +37,28 @@ Toy folders only, until the human runs. The full `uv run pytest -q` is for the h
 - [ ] Margin: `EQUIV_MARGIN` in `compare_seeds.py`, recorded as `equiv_margin` in `run.json`, a sealed file → AC-14, AC-28
 - [ ] Bootstrap settings and `alpha`: from the eval folder config, as a test already proves → AC-11
 - [ ] `true_ml` for WT on the 3 seed 42 evals, within 0.1 mL of `ml_WT`, and scores unchanged, through `rescore_problems` → AC-26
+
+## Milestone 3 (added 2026-11-07)
+Toy folders and a toy git repo, until the human runs. No test case exists in any of these steps.
+- [ ] `uv run pytest -q` → 811 or more pass → AC-19 to AC-21, AC-27, AC-28, AC-30, AC-31
+- [ ] `uv run ruff check .` → clean → AC-23
+- [ ] `compare_seeds.py --runs experiments/0007-confirmation/runs.toml --fold test --preflight` on the real manifest today → exit 2, writes nothing → AC-20
+- [ ] `compare_seeds.py --runs experiments/0007-confirmation/runs.toml --fold val --preflight` → exit 2, `only for --fold test` → AC-20
+- [ ] `evaluate.py --run results/0003-baseline/20261103-023817-f9b3afb6 --fold test --open-test` today → exit 2, prints `test gate, nothing read`, names the missing gate file, the tag and the val compare, and leaves no `*-test` folder → AC-19, AC-27
+- [ ] Remove `opening_problems` from `check_test_gate` in a copy → gate tests fail. Exclude `test_the_pinned_protocol_hash_is_the_seal`, or that test trips first and proves nothing → AC-27
+- [ ] Remove the `git diff` check from `seal_problems` in a copy → `test_an_eval_commit_with_a_moved_sealed_file_is_refused` fails → AC-28
+- [ ] `grep -- '--open-test\|--fold test\|--folds test' experiments/0005-strategies/KAGGLE.md` → no match → AC-21
+- [ ] `git diff db5d56f -- experiments/0005-strategies/compare.py` → empty → AC-21
+- [ ] Read the dated notes in spec 0005, at its AC-11, AC-20, AC-21 and the E1 rescoring line → each points to spec 0006 → AC-7, AC-21
+- [ ] Real opening, human only: all 12 test evals, then `rq1_seeds.py` → 6 lines, each `agree` or `split` → AC-22, AC-30
+
+## Value sourcing, milestone 3
+- [ ] Literature gate: in a copy of `test-gate.md`, try `papers_read: 49`, `status: Pass`, a missing `cai_status` and a second `status` line → each refused by `gate_problems`, at the preflight and at `evaluate.py`; at 50 papers it passes → AC-19
+- [ ] Gate at the commit: an eval commit whose own `test-gate.md` says fail is refused, even if the tree says pass, because `seal_problems` uses `git show` → AC-28
+- [ ] Tag name: `PREREG_TAG` set to `prereg-v2` with evals on the older commit → refused until they are scored again → AC-31
+- [ ] Val compare: `run_ids` without this run, or a status that is not `ok` → the gate refuses before any case is read → AC-27
+- [ ] Margin: a changed `EQUIV_MARGIN` changes `compare_hash`, so `--fold test` refuses → AC-14, AC-28
+- [ ] H1 agreement: 3 seeds with `not supported` and different pattern lists → `agree`; 2 against 1 → `split, claim not made` → AC-30
+
+## Not covered yet
+AC-1, AC-5, AC-6, AC-8, AC-23 (the check command), AC-25: milestone 4 and the human steps. AC-22 needs the real opening. `0007-confirmation/KAGGLE.md` holds only the test path half so far.

@@ -2,6 +2,10 @@
 
     uv run python experiments/0007-confirmation/compare_seeds.py --runs \
         experiments/0007-confirmation/runs.toml --fold val
+    uv run python experiments/0007-confirmation/compare_seeds.py --runs \
+        experiments/0007-confirmation/runs.toml --fold test --preflight
+    uv run python experiments/0007-confirmation/compare_seeds.py --runs \
+        experiments/0007-confirmation/runs.toml --fold test
 Exit 2, printing every failed rule and writing nothing, unless the manifest, the 12 runs and the 12
 evals pass AC-10. For each subject, region and pattern, an arm's value is the mean over its 3 seeds,
 and every test runs on those means, so n is the number of subjects (AC-11). Writes
@@ -9,7 +13,9 @@ and every test runs on those means, so n is the number of subjects (AC-11). Writ
 lines: 9 H2, 6 H3, 3 H4) and run.json, last. All numbers come from metrics.csv of the evals, so it
 uses no GPU. A finished folder is refused unless --rerun-reason is given (AC-17).
 
-The test path is build step 6, so --fold test is refused until then.
+--fold test also refuses if a sealed file moved since the val compare or the tag, or if the commit
+of an eval has no passing literature gate (AC-28). --preflight runs every guard that needs no test
+metric, and writes nothing (AC-20). It reads no test case, so it goes before the opening.
 
 This repeats some of 0005-strategies/compare.py on purpose: experiments never import each other,
 and that file stays unchanged (AC-21). A test proves both give the same H2 lines (AC-24).
@@ -30,19 +36,29 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.data import REGIONS
-from common.evaluation import PREREG_TAG, PROTOCOL_FILES, check_rules
+from common.evaluation import (
+    LITERATURE_GATE,
+    PREREG_TAG,
+    PROTOCOL_FILES,
+    check_rules,
+    check_test_gate,
+    descends_from_tag,
+    gate_problems,
+    protocol_hash,
+)
 from common.missing import PATTERNS
-from common.runlog import git_info, load_config, load_run
+from common.runlog import config_hash, git_info, load_config, load_run
 from common.stats import bootstrap_ci, bootstrap_indices, holm, paired_wilcoxon
 from common.strategies import strategy_name
 
 REPO = Path(__file__).resolve().parents[2]
 # protocol_hash() at the tag commit. Repinned there, beside SEALED_HASH; a test keeps them equal.
-EXPECTED_PROTOCOL_HASH = "741757cfba6218188e9ef789456654a24da27c76fe9226fd1d507b27ed78ceb6"
+EXPECTED_PROTOCOL_HASH = "fa903bff0f4a7dfd20863c633e35b6350e8feb14407f2d33a4b16d089a0ad9e2"
 # The scored files after protocol_hash(): a compare is refused if one moved since the val compare
 SEALED_FILES = (*PROTOCOL_FILES, "experiments/common/strategies.py", "experiments/common/model.py",
                 "experiments/0004-missing-eval/evaluate.py",
                 "experiments/0007-confirmation/compare_seeds.py")
+EVAL_CONFIG = Path(__file__).resolve().parents[1] / "0004-missing-eval" / "config.toml"
 EQUIV_MARGIN = 0.015  # in Dice, borrowed from Oechsner 2026 (AC-14), a sealed value
 ARMS = ("e1", "e3", "e4", "e3b")
 ARM_NAMES = {"e1": "E1", "e3": "E3", "e4": "E4", "e3b": "E3b"}
@@ -176,14 +192,6 @@ def run_problems(dirs):
     return errors, recs
 
 
-def descends_from_tag(commit):
-    """True if commit holds the protocol tag. Unknown tag or unknown commit gives False."""
-    r = subprocess.run(["git", "-C", str(REPO), "merge-base", "--is-ancestor",
-                        f"refs/tags/{PREREG_TAG}", str(commit)],
-                       capture_output=True, check=False)
-    return r.returncode == 0
-
-
 def eval_problems(eval_dirs, run_dirs, fold):
     """Every failed AC-10 rule on the 12 eval folders. Returns (errors, {slot: run.json},
     {slot: metrics}), the last two empty unless all 12 could be read."""
@@ -210,7 +218,7 @@ def eval_problems(eval_dirs, run_dirs, fold):
                for slot, rec in recs.items() if rec.get("protocol_hash") != EXPECTED_PROTOCOL_HASH]
     errors += [f"{label(*slot)} eval: commit {rec.get('git_commit')} does not descend from "
                f"{PREREG_TAG}" for slot, rec in recs.items()
-               if not descends_from_tag(rec.get("git_commit"))]
+               if not descends_from_tag(rec.get("git_commit"), PREREG_TAG, REPO)]
     for slot, df in frames.items():
         n = sum(int(np.isinf(pd.to_numeric(df[c], errors="coerce")).sum()) for c in METRICS)
         if n:
@@ -478,12 +486,67 @@ def folder_problems(folder, rerun_reason):
     return [] if rerun_reason else [f"{folder} is finished; give --rerun-reason to replace it"]
 
 
+def seal_problems(commit):
+    """AC-28 for one commit: no sealed file differs from the tag, and its literature gate passes.
+    Asks git about that commit, so an edit in the tree or a rewrite after the opening changes
+    nothing here."""
+    diff = subprocess.run(["git", "-C", str(REPO), "diff", "--quiet", f"refs/tags/{PREREG_TAG}",
+                           str(commit), "--", *SEALED_FILES], capture_output=True, check=False)
+    errors = [f"commit {commit}: a sealed file differs from {PREREG_TAG}"] if diff.returncode else []
+    gate = subprocess.run(["git", "-C", str(REPO), "show", f"{commit}:{LITERATURE_GATE}"],
+                          capture_output=True, encoding="utf-8", check=False)
+    if gate.returncode:
+        return errors + [f"commit {commit}: it holds no {LITERATURE_GATE}"]
+    return errors + [f"commit {commit}: {e}" for e in gate_problems(gate.stdout)]
+
+
+def val_compare_problems(out, run_recs, eval_recs):
+    """AC-28 against compare-val/run.json. eval_recs are the test evals, or in the preflight the
+    val evals, which must still be the ones the val compare read."""
+    folder = out / "compare-val"
+    if not (folder / "run.json").is_file():
+        return [f"{folder} missing: run compare_seeds.py --fold val first"]
+    rec = load_run(folder)
+    errors = []
+    if rec.get("status") != "ok":
+        errors.append(f"val compare: status is {rec.get('status')!r}, not 'ok'")
+    if rec.get("run_ids") != {slot_key(s): r["run_id"] for s, r in run_recs.items()}:
+        errors.append("val compare: names other runs")
+    if rec.get("compare_hash") != compare_hash():
+        errors.append("compare_hash differs from the val compare's: a sealed file moved")
+    return errors + [f"{label(*slot)} eval: {k} differs from the val compare's"
+                     for slot, ev in eval_recs.items() for k in ("protocol_hash", "splits_sha256")
+                     if ev.get(k) != rec.get(k)]
+
+
+def preflight_problems(a, run_dirs, run_recs):
+    """Every guard of the test path that needs no test metric (AC-20): the 12 val evals, the gate
+    of evaluate.py for each model, the val compare, and the seal of this commit. Reads no test
+    case. A test eval on disk means the opening has happened, and no amendment exists after it
+    (AC-31)."""
+    commit, dirty = git_info()
+    val_dirs = {s: a.evals / f"{r['run_id']}-val" for s, r in run_recs.items()}
+    errors, val_recs, _ = eval_problems(val_dirs, run_dirs, "val")
+    protocol = protocol_hash()
+    if protocol != EXPECTED_PROTOCOL_HASH:
+        errors.append("protocol_hash() is not the pinned one")
+    config = config_hash({"eval": {**load_config(EVAL_CONFIG)["eval"], "quick": False}})
+    for slot, rec in run_recs.items():
+        errors += [f"{label(*slot)} gate: {e}" for e in check_test_gate(
+            "test", True, False, rec, (commit, dirty), val_dirs[slot], run_dirs[slot], protocol,
+            config)]
+    errors += val_compare_problems(a.out, run_recs, val_recs)
+    errors += seal_problems(commit)
+    return errors + [f"{label(*slot)}: {a.evals / (r['run_id'] + '-test')} exists: the test was "
+                     "opened already" for slot, r in run_recs.items()
+                     if (a.evals / f"{r['run_id']}-test").exists()]
+
+
 def guards(a):
-    """Every failed rule of AC-10 and AC-17. Returns (errors, run records, eval folders, eval
-    records, frames)."""
-    if a.fold == "test":
-        return (["--fold test is not built yet: it comes with spec 0006, build step 6"],
-                {}, {}, {}, {})
+    """Every failed rule of AC-10, AC-17 and AC-28. Returns (errors, run records, eval folders,
+    eval records, frames)."""
+    if a.preflight and a.fold != "test":
+        return ["--preflight is only for --fold test"], {}, {}, {}, {}
     errors, run_dirs = manifest_problems(a.runs, a.root)
     if len(run_dirs) != len(slots()):
         return errors, {}, {}, {}, {}
@@ -491,9 +554,15 @@ def guards(a):
     errors += more
     if not run_recs:
         return errors, {}, {}, {}, {}
+    if a.preflight:
+        return errors + preflight_problems(a, run_dirs, run_recs), run_recs, {}, {}, {}
     eval_dirs = {slot: a.evals / f"{rec.get('run_id')}-{a.fold}" for slot, rec in run_recs.items()}
     more, eval_recs, frames = eval_problems(eval_dirs, run_dirs, a.fold)
     errors += more
+    if a.fold == "test":
+        errors += val_compare_problems(a.out, run_recs, eval_recs)
+        for commit in sorted({str(rec.get("git_commit")) for rec in eval_recs.values()}):
+            errors += seal_problems(commit)
     errors += folder_problems(a.out / f"compare-{a.fold}", a.rerun_reason)
     return errors, run_recs, eval_dirs, eval_recs, frames
 
@@ -531,12 +600,16 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, default=REPO / "results/0007-confirmation")
     ap.add_argument("--root", type=Path, default=REPO, help="the folder that holds results/")
     ap.add_argument("--rerun-reason")
+    ap.add_argument("--preflight", action="store_true", help="the checks before the test opening")
     a = ap.parse_args(argv)
     errors, run_recs, eval_dirs, eval_recs, frames = guards(a)
     if errors:
         for e in errors:
             print(f"ERROR: {e}")
         return 2
+    if a.preflight:
+        print("preflight PASS: nothing read from the test fold, nothing written")
+        return 0
 
     first = ARMS[0], SEEDS[0]
     cfg = load_config(eval_dirs[first] / "config.toml")["eval"]

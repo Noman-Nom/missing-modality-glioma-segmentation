@@ -1,20 +1,28 @@
 """Spec 0006: compare_seeds.py on toy run and eval folders with known answers. Covers AC-9 to AC-11,
 AC-13, and the H2 part of AC-24. Nothing here trains or scores a model, and no number here is a
 result. Each test is one rule, stated in its name, shown on 12 toy folders. Also covers AC-7 and
-AC-12 to AC-18 and AC-24 to AC-26 and AC-29."""
+AC-12 to AC-22, AC-24 to AC-26, AC-28 and AC-29 to AC-31."""
 import csv
 import hashlib
 import importlib.util
 import json
 import math
+import re
 import subprocess
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from common.cache import sha256_file
 from common.data import REGIONS
-from common.evaluation import METRIC_COLUMNS, PREREG_TAG, PROTOCOL_FILES, protocol_hash
+from common.evaluation import (
+    LITERATURE_GATE,
+    METRIC_COLUMNS,
+    PREREG_TAG,
+    PROTOCOL_FILES,
+    protocol_hash,
+)
 from common.missing import PATTERNS
 from common.runlog import config_hash, dump_config, load_config
 from conftest import write_splits
@@ -24,10 +32,14 @@ E1_CONFIG = REPO / "experiments" / "0003-baseline" / "config.toml"
 E2_CONFIG = REPO / "experiments" / "0004-missing-eval" / "config.toml"
 N = 10
 VAL = [f"BraTS-GLI-001{i:02d}-000" for i in range(N)]
+TEST = [f"BraTS-GLI-002{i:02d}-000" for i in range(N)]
 TRAIN = ["BraTS-GLI-00301-000", "BraTS-GLI-00302-000"]
-INDEX = {c: i for i, c in enumerate(VAL)}
+INDEX = {c: i for i, c in enumerate(VAL + TEST)} | {c: i for i, c in enumerate(TEST)}
 VERSIONS = {"torch": "1", "monai": "2"}
 PROTOCOL = "p"
+# compare.py of spec 0005, as reviewed. It stays unchanged, for val only (spec 0006, AC-21)
+OLD_COMPARE_SHA = "33c51fd3950781e74d174554c4969846f06b42c2db285d6b87145ca8bbe85001"
+GOOD_GATE = "status: pass\ndate: 2027-01-15\npapers_read: 50\ncai_status: x\ncitation_search: y\n"
 
 
 def load(folder, name):
@@ -39,6 +51,7 @@ def load(folder, name):
 
 
 cs = load("0007-confirmation", "compare_seeds")
+rq1 = load("0007-confirmation", "rq1_seeds")
 old_compare = load("0005-strategies", "compare")
 
 
@@ -71,11 +84,11 @@ def toy_bias(arm, seed):
     return lambda c, p: mean + (INDEX[c] - (N - 1) / 2) * 0.2
 
 
-def write_metrics(path, dice, hd95, bias=lambda c, p: 0.0):
+def write_metrics(path, dice, hd95, bias=lambda c, p: 0.0, cases=VAL):
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=METRIC_COLUMNS, lineterminator="\n")
         w.writeheader()
-        for c in VAL:
+        for c in cases:
             for p in PATTERNS:
                 for g in REGIONS:
                     w.writerow({"eval_id": "x", "case": c, "subject": c.split("-")[2],
@@ -88,7 +101,9 @@ def write_metrics(path, dice, hd95, bias=lambda c, p: 0.0):
 
 @pytest.fixture(scope="session")
 def tagged_repo(tmp_path_factory):
-    """A tiny real git repo: one commit before the tagged one, the tagged one, one after it."""
+    """A tiny real git repo, in order: a commit before the tag, the tagged one, `after` with a
+    passing gate, `failed` whose gate says fail, and `moved`, where a sealed file changed and the
+    gate passes again, with a second tag on it."""
     repo = tmp_path_factory.mktemp("repo")
 
     def git(*args):
@@ -100,10 +115,28 @@ def tagged_repo(tmp_path_factory):
     git("init", "-q")
     git("commit", "-q", "--allow-empty", "-m", "before")
     before = git("rev-parse", "HEAD")
-    git("commit", "-q", "--allow-empty", "-m", "tagged")
+    sealed = repo / cs.SEALED_FILES[0]
+    gate = repo / LITERATURE_GATE
+    gate.parent.mkdir(parents=True)
+    sealed.parent.mkdir(parents=True)
+
+    def commit(name):
+        git("add", "-A")
+        git("commit", "-q", "--allow-empty", "-m", name)
+        return git("rev-parse", "HEAD")
+
+    sealed.write_text("sealed")
+    commit("tagged")
     git("tag", "-a", PREREG_TAG, "-m", "tag")
-    git("commit", "-q", "--allow-empty", "-m", "after")
-    return repo, before, git("rev-parse", "HEAD")
+    gate.write_text(GOOD_GATE)
+    after = commit("after")
+    gate.write_text(GOOD_GATE.replace("status: pass", "status: fail"))
+    failed = commit("failed")
+    gate.write_text(GOOD_GATE)
+    sealed.write_text("changed")
+    moved = commit("moved")
+    git("tag", "-a", "prereg-v2", "-m", "amended")
+    return repo, before, after, failed, moved
 
 
 class World:
@@ -113,7 +146,7 @@ class World:
         self.root, self.commit = root, commit
         self.splits = root / "splits.csv"
         write_splits(self.splits, [(c, "train", 0, False) for c in TRAIN]
-                     + [(c, "val", 0, False) for c in VAL])
+                     + [(c, "val", 0, False) for c in VAL] + [(c, "test", 0, False) for c in TEST])
         self.evals, self.out = root / "evals", root / "out"
         self.dice = {s: toy_dice(*s) for s in cs.slots()}
         self.hd95 = {s: toy_hd95(*s) for s in cs.slots()}
@@ -134,8 +167,8 @@ class World:
     def run_dir(self, s):
         return self.root / self.paths[s]
 
-    def eval_dir(self, s):
-        return self.evals / f"{s[0]}-{s[1]}-val"
+    def eval_dir(self, s, fold="val"):
+        return self.evals / f"{s[0]}-{s[1]}-{fold}"
 
     def write_run(self, s):
         arm, seed = s
@@ -151,22 +184,34 @@ class World:
         dump_config(cfg, run / "config.toml")
         (run / "run.json").write_text(json.dumps(
             {"run_id": f"{arm}-{seed}", "status": "ok", "quick": False, "train_cases": TRAIN,
-             "val_cases": VAL, "seed": seed, "gpu": "T4", "cache_hash": "c", "resumes": []}))
+             "val_cases": VAL, "seed": seed, "gpu": "T4", "cache_hash": "c", "resumes": [],
+             "best_iteration": 1}))
+        (run / "checkpoints").mkdir()
+        (run / "checkpoints" / "best.pt").write_text(arm)
         with open(run / "metrics_val.csv", "w", newline="") as f:
             w = csv.writer(f, lineterminator="\n")
             w.writerow(["case", "region", "dice"])
             w.writerows((c, g, self.dice[s](c, 1, g)) for c in VAL for g in REGIONS)
 
-    def write_eval(self, s):
-        d = self.eval_dir(s)
+    def write_eval(self, s, fold="val"):
+        d = self.eval_dir(s, fold)
         d.mkdir(parents=True)
-        dump_config(load_config(E2_CONFIG), d / "config.toml")
+        saved = {"eval": {**load_config(E2_CONFIG)["eval"], "quick": False}}
+        dump_config(saved, d / "config.toml")
         (d / "run.json").write_text(json.dumps(
-            {"status": "ok", "quick": False, "fold": "val", "n_cases": N, "gpu": "T4",
-             "source_run_id": f"{s[0]}-{s[1]}", "protocol_hash": PROTOCOL, "splits_sha256": "s",
+            {"status": "ok", "quick": False, "fold": fold, "n_cases": N, "gpu": "T4",
+             "source_run_id": f"{s[0]}-{s[1]}", "source_seed": s[1], "protocol_hash": PROTOCOL,
+             "splits_sha256": sha256_file(self.splits),
              "config_hash": config_hash(load_config(d / "config.toml")), "versions": VERSIONS,
-             "source_best_iteration": 1, "source_best_sha256": s[0], "git_commit": self.commit}))
-        write_metrics(d / "metrics.csv", self.dice[s], self.hd95[s], toy_bias(*s))
+             "source_best_iteration": 1,
+             "source_best_sha256": sha256_file(self.run_dir(s) / "checkpoints" / "best.pt"),
+             "git_commit": self.commit}))
+        write_metrics(d / "metrics.csv", self.dice[s], self.hd95[s], toy_bias(*s),
+                      VAL if fold == "val" else TEST)
+
+    def open_test(self):
+        for s in cs.slots():
+            self.write_eval(s, "test")
 
     def edit(self, path, **fields):
         rec = json.loads(Path(path).read_text())
@@ -185,6 +230,9 @@ class World:
     def run(self, fold="val", *more):
         return cs.main([*self.args(fold), *more])
 
+    def preflight(self):
+        return self.run("test", "--preflight")
+
     def folder(self):
         return self.out / "compare-val"
 
@@ -194,10 +242,18 @@ class World:
 
 @pytest.fixture
 def world(tmp_path, tagged_repo, monkeypatch):
-    repo, _, after = tagged_repo
+    repo, _, after, *_ = tagged_repo
     monkeypatch.setattr(cs, "REPO", repo)
     monkeypatch.setattr(cs, "EXPECTED_PROTOCOL_HASH", PROTOCOL)
-    return World(tmp_path, after)
+    monkeypatch.setattr(cs, "protocol_hash", lambda: PROTOCOL)
+    monkeypatch.setattr(cs, "git_info", lambda: (after, False))
+    # the gate inside evaluation.py, which keeps its own paths and its own view of the tag
+    w = World(tmp_path, after)
+    (tmp_path / "test-gate.md").write_text(GOOD_GATE)
+    monkeypatch.setattr("common.evaluation.GATE_FILE", tmp_path / "test-gate.md")
+    monkeypatch.setattr("common.evaluation.COMPARE_VAL", w.folder())
+    monkeypatch.setattr("common.evaluation.descends_from_tag", lambda *a: True)
+    return w
 
 
 def primary(world, comparison, region, metric="dice"):
@@ -418,12 +474,6 @@ def test_unknown_commit_is_refused(world, capsys):
 def test_no_tag_at_all_is_refused(world, capsys, monkeypatch):
     monkeypatch.setattr(cs, "PREREG_TAG", "prereg-v9")
     refused(world, capsys, "does not descend from prereg-v9")
-
-
-def test_test_fold_is_refused_until_its_guards_exist(world, capsys):
-    assert world.run("test") == 2
-    assert "build step 6" in capsys.readouterr().out
-    assert not world.out.exists()
 
 
 def test_a_broken_tie_out_is_refused(world, capsys):
@@ -906,3 +956,308 @@ def test_a_cut_verdict_stops(world, tmp_path):
     verdict.write_text("\n".join(verdict.read_text().splitlines()[:12]) + "\n")
     with pytest.raises(SystemExit, match="H3"):
         tables(world, tmp_path)
+
+
+def finish_val(world):
+    assert world.run() == 0
+
+
+def opened(world):
+    finish_val(world)
+    world.open_test()
+
+
+def refused_test(world, capsys, message):
+    before = sorted(p.name for p in world.out.iterdir())
+    assert world.run("test") == 2
+    assert message in capsys.readouterr().out
+    assert sorted(p.name for p in world.out.iterdir()) == before
+
+
+def refused_preflight(world, capsys, message):
+    before = sorted(p.name for p in world.out.iterdir())
+    assert world.preflight() == 2
+    assert message in capsys.readouterr().out
+    assert sorted(p.name for p in world.out.iterdir()) == before
+
+
+# covers: AC-20, happy path, the preflight then the test compare
+def test_the_preflight_passes_and_writes_nothing(world, capsys):
+    finish_val(world)
+    before = sorted(p.name for p in world.out.iterdir())
+    assert world.preflight() == 0
+    assert "preflight PASS" in capsys.readouterr().out
+    assert sorted(p.name for p in world.out.iterdir()) == before
+    assert not list(world.evals.glob("*-test"))
+
+
+# covers: AC-17, AC-18, AC-28 on the test fold
+def test_the_test_compare_runs_after_val(world):
+    opened(world)
+    assert world.run("test") == 0
+    rec = json.loads((world.out / "compare-test" / "run.json").read_text())
+    val = json.loads((world.folder() / "run.json").read_text())
+    assert (rec["fold"], rec["versions_equal"]) == ("test", True)
+    assert rec["compare_hash"] == val["compare_hash"]
+    assert len((world.out / "compare-test" / "verdict.txt").read_text().splitlines()) == 18
+
+
+def test_a_finished_test_compare_needs_a_reason(world, capsys):
+    opened(world)
+    assert world.run("test") == 0
+    refused_test(world, capsys, "give --rerun-reason")
+
+
+def test_the_preflight_is_only_for_the_test_fold(world, capsys):
+    assert world.run("val", "--preflight") == 2
+    assert "only for --fold test" in capsys.readouterr().out
+    assert not world.out.exists()
+
+
+# covers: AC-10, the same rules hold on test
+def test_the_test_fold_keeps_the_guards_of_val(world, capsys):
+    opened(world)
+    s = ("e3b", 43)
+    world.edit(world.eval_dir(s, "test") / "run.json", status="running")
+    refused_test(world, capsys, "status is 'running'")
+
+
+def test_a_test_eval_cut_short_is_refused(world, capsys):
+    opened(world)
+    s = ("e3", 44)
+    write_metrics(world.eval_dir(s, "test") / "metrics.csv", world.dice[s], world.hd95[s],
+                  cases=TEST[:-1])
+    refused_test(world, capsys, "metrics.csv has")
+
+
+def test_versions_that_differ_warn_on_test_and_are_recorded(world, capsys):
+    opened(world)
+    world.edit(world.eval_dir(S, "test") / "run.json", versions={"torch": "9"})
+    assert world.run("test") == 0
+    assert "WARNING: versions differ" in capsys.readouterr().out
+    assert not json.loads((world.out / "compare-test" / "run.json").read_text())["versions_equal"]
+
+
+def test_the_test_compare_needs_the_val_compare(world, capsys):
+    world.open_test()
+    world.out.mkdir()
+    refused_test(world, capsys, "compare_seeds.py --fold val first")
+
+
+def test_a_val_compare_that_did_not_finish_is_refused(world, capsys):
+    opened(world)
+    world.edit(world.folder() / "run.json", status="running")
+    refused_test(world, capsys, "val compare: status is 'running'")
+
+
+def test_a_val_compare_of_other_runs_is_refused(world, capsys):
+    opened(world)
+    rec = json.loads((world.folder() / "run.json").read_text())
+    world.edit(world.folder() / "run.json", run_ids=rec["run_ids"] | {"e1_seed42": "other"})
+    refused_test(world, capsys, "names other runs")
+
+
+# covers: AC-28, the Tamper scenario. The margin lives in compare_seeds.py, a sealed file, so a
+# changed margin is a changed compare_hash
+def test_a_changed_sealed_file_since_val_is_refused(world, capsys, monkeypatch):
+    opened(world)
+    monkeypatch.setattr(cs, "compare_hash", lambda: "another margin")
+    refused_test(world, capsys, "compare_hash differs")
+
+
+@pytest.mark.parametrize("key", ["protocol_hash", "splits_sha256"])
+def test_a_hash_that_differs_from_the_val_compare_is_refused(world, capsys, key):
+    opened(world)
+    world.edit(world.folder() / "run.json", **{key: "other"})
+    refused_test(world, capsys, f"{key} differs from the val compare's")
+
+
+def test_an_eval_commit_with_a_moved_sealed_file_is_refused(world, capsys, tagged_repo):
+    opened(world)
+    world.edit(world.eval_dir(S, "test") / "run.json", git_commit=tagged_repo[4])
+    refused_test(world, capsys, f"a sealed file differs from {PREREG_TAG}")
+
+
+def test_an_eval_commit_whose_gate_failed_is_refused(world, capsys, tagged_repo):
+    opened(world)
+    world.edit(world.eval_dir(S, "test") / "run.json", git_commit=tagged_repo[3])
+    refused_test(world, capsys, "status is 'fail'")
+
+
+def test_an_eval_commit_with_no_gate_file_is_refused(world, capsys, tagged_repo):
+    opened(world)
+    # the tagged commit descends from the tag and holds no gate file
+    tagged = subprocess.run(["git", "-C", str(tagged_repo[0]), "rev-parse", f"{PREREG_TAG}^{{}}"],
+                            check=True, capture_output=True, text=True).stdout.strip()
+    world.edit(world.eval_dir(S, "test") / "run.json", git_commit=tagged)
+    refused_test(world, capsys, f"holds no {LITERATURE_GATE}")
+
+
+def test_the_preflight_needs_the_val_compare(world, capsys):
+    world.out.mkdir()
+    refused_preflight(world, capsys, "compare_seeds.py --fold val first")
+
+
+def test_the_preflight_refuses_a_dirty_tree(world, capsys, monkeypatch):
+    finish_val(world)
+    monkeypatch.setattr(cs, "git_info", lambda: (world.commit, True))
+    refused_preflight(world, capsys, "git_dirty is True")
+
+
+def test_the_preflight_refuses_a_failed_literature_gate(world, capsys):
+    finish_val(world)
+    (world.root / "test-gate.md").write_text(GOOD_GATE.replace("papers_read: 50", "papers_read: 49"))
+    refused_preflight(world, capsys, "papers_read is 49, below 50")
+
+
+def test_the_preflight_asks_git_about_the_commit_not_the_tree(world, capsys, tagged_repo,
+                                                              monkeypatch):
+    finish_val(world)
+    monkeypatch.setattr(cs, "git_info", lambda: (tagged_repo[3], False))
+    refused_preflight(world, capsys, "status is 'fail'")
+
+
+def test_the_preflight_refuses_a_moved_sealed_file(world, capsys, tagged_repo, monkeypatch):
+    finish_val(world)
+    monkeypatch.setattr(cs, "git_info", lambda: (tagged_repo[4], False))
+    refused_preflight(world, capsys, f"a sealed file differs from {PREREG_TAG}")
+
+
+def test_the_preflight_refuses_a_commit_outside_the_tag(world, capsys, monkeypatch):
+    finish_val(world)
+    monkeypatch.setattr("common.evaluation.descends_from_tag", lambda *a: False)
+    refused_preflight(world, capsys, f"does not descend from {PREREG_TAG}")
+
+
+def test_the_preflight_refuses_a_protocol_that_moved(world, capsys, monkeypatch):
+    finish_val(world)
+    monkeypatch.setattr(cs, "protocol_hash", lambda: "moved")
+    refused_preflight(world, capsys, "not the pinned one")
+
+
+def test_the_preflight_refuses_a_swapped_checkpoint(world, capsys):
+    finish_val(world)
+    (world.run_dir(S) / "checkpoints" / "best.pt").write_text("swapped")
+    refused_preflight(world, capsys, "source_best_sha256 differs")
+
+
+def test_the_preflight_refuses_a_run_the_val_compare_does_not_list(world, capsys):
+    finish_val(world)
+    rec = json.loads((world.folder() / "run.json").read_text())
+    world.edit(world.folder() / "run.json", run_ids=rec["run_ids"] | {"e4_seed44": "other"})
+    refused_preflight(world, capsys, "val compare does not list run e4-44")
+
+
+# covers: AC-31, after the opening no amendment exists
+def test_the_preflight_refuses_after_the_opening(world, capsys):
+    opened(world)
+    refused_preflight(world, capsys, "the test was opened already")
+
+
+# covers: AC-31
+def test_an_amended_tag_needs_new_evals(world, capsys, tagged_repo, monkeypatch):
+    monkeypatch.setattr(cs, "PREREG_TAG", "prereg-v2")
+    refused(world, capsys, "does not descend from prereg-v2")
+    for s in cs.slots():
+        world.edit(world.eval_dir(s) / "run.json", git_commit=tagged_repo[4])
+    assert world.run() == 0
+    assert json.loads((world.folder() / "run.json").read_text())["prereg_tag"] == "prereg-v2"
+
+
+def test_the_tag_name_can_only_be_a_prereg_version():
+    assert re.fullmatch(r"prereg-v[1-9][0-9]*", PREREG_TAG)
+
+
+# covers: AC-21
+def test_the_old_kaggle_steps_open_no_test():
+    text = (REPO / "experiments" / "0005-strategies" / "KAGGLE.md").read_text()
+    for step in ("--open-test", "--fold test", "--folds test", "joint-test"):
+        assert step not in text
+    assert "experiments/0007-confirmation/KAGGLE.md" in text
+
+
+# covers: AC-21, unchanged, so the file a reviewer read is the file that stays
+def test_the_old_compare_is_unchanged():
+    assert sha256_file(REPO / "experiments" / "0005-strategies" / "compare.py") == OLD_COMPARE_SHA
+
+
+# covers: AC-20, AC-30
+def test_the_new_steps_keep_the_order_and_give_each_seed_its_own_tables():
+    text = (REPO / "experiments" / "0007-confirmation" / "KAGGLE.md").read_text()
+    steps = ["--fold val` passes", "test-gate.md", "--preflight` passes", "preprocess.py --folds test",
+             "--fold test --open-test", "`compare_seeds.py --fold test` runs"]
+    where = [text.index(s) for s in steps]
+    assert where == sorted(where)
+    assert "--out-dir writing/tables/e1-seed$SEED" in text
+
+
+def write_verdict(root, seed, lines, **fields):
+    d = root / f"e1-{seed}-test"
+    d.mkdir()
+    (d / "verdict.txt").write_text("\n".join(lines) + "\n")
+    (d / "run.json").write_text(json.dumps(
+        {"status": "ok", "quick": False, "fold": "test", "source_seed": seed} | fields))
+    return d
+
+
+H1 = ["H1a WT: supported", "H1b WT: supported (n_missing=1, p_holm=0.01)"]
+SPLIT = ["H1a WT: not supported (patterns 2, 3)", "H1b WT: supported (n_missing=1, p_holm=0.02)"]
+
+
+def rq1_args(dirs, out):
+    return [x for d in dirs for x in ("--eval", str(d))] + ["--out", str(out)]
+
+
+# covers: AC-30
+def test_h1_lines_agree_only_on_the_same_word(tmp_path):
+    dirs = [write_verdict(tmp_path, 42, H1), write_verdict(tmp_path, 43, H1),
+            write_verdict(tmp_path, 44, SPLIT)]
+    out = tmp_path / "rq1.txt"
+    assert rq1.main(rq1_args(dirs, out)) == 0
+    assert out.read_text().splitlines() == [
+        ("H1a WT: split, claim not made (seed 42 supported, seed 43 supported, "
+         "seed 44 not supported)"),
+        "H1b WT: agree, supported (seeds 42, 43, 44)"]
+
+
+# covers: AC-30, three times not supported is agreement too, and the pattern lists may differ
+def test_h1_not_supported_on_all_seeds_agrees(tmp_path):
+    lines = [["H1a WT: not supported (patterns 2)"], ["H1a WT: not supported (patterns 3)"],
+             ["H1a WT: not supported (patterns 2, 3)"]]
+    dirs = [write_verdict(tmp_path, s, ln) for s, ln in zip(cs.SEEDS, lines, strict=True)]
+    out = tmp_path / "rq1.txt"
+    assert rq1.main(rq1_args(dirs, out)) == 0
+    assert out.read_text() == "H1a WT: agree, not supported (seeds 42, 43, 44)\n"
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    ({"fold": "val"}, "not 'test'"),
+    ({"status": "running"}, "not a finished full eval"),
+    ({"quick": True}, "not a finished full eval"),
+    ({"source_seed": 43}, "expected [42, 43, 44]"),
+])
+def test_rq1_needs_the_three_finished_test_evals(tmp_path, capsys, change, message):
+    dirs = [write_verdict(tmp_path, 42, H1, **change), write_verdict(tmp_path, 43, H1),
+            write_verdict(tmp_path, 44, H1)]
+    out = tmp_path / "rq1.txt"
+    assert rq1.main(rq1_args(dirs, out)) == 1
+    assert message in capsys.readouterr().out
+    assert not out.exists()
+
+
+def test_rq1_refuses_a_missing_verdict_and_a_broken_line(tmp_path, capsys):
+    dirs = [write_verdict(tmp_path, 42, H1), write_verdict(tmp_path, 43, ["H1a WT: maybe"]),
+            write_verdict(tmp_path, 44, H1)]
+    (dirs[2] / "verdict.txt").unlink()
+    out = tmp_path / "rq1.txt"
+    assert rq1.main(rq1_args(dirs, out)) == 1
+    text = capsys.readouterr().out
+    assert "not an H1 verdict line" in text and "run analyse.py first" in text
+    assert not out.exists()
+
+
+def test_rq1_refuses_verdicts_with_different_lines(tmp_path, capsys):
+    dirs = [write_verdict(tmp_path, 42, H1), write_verdict(tmp_path, 43, H1),
+            write_verdict(tmp_path, 44, H1[:1])]
+    assert rq1.main(rq1_args(dirs, tmp_path / "rq1.txt")) == 1
+    assert "different H1 lines" in capsys.readouterr().out
