@@ -29,7 +29,7 @@ Toy folders only, until the human runs. The full `uv run pytest -q` is for the h
 - [ ] In `compare_seeds.py`, a CI of exactly minus 0.015 to 0.01 → `inconclusive`, never `equivalent` → AC-14
 - [ ] On the 12 real val evals, `compare_seeds.py --fold val` → 18 verdict lines, `summary.csv` 87 rows, `patterns.csv` 360, `per_seed.csv` 180, `volume.csv` 180, `run.json` last → AC-17, AC-18
 - [ ] Run it again with `--rerun-reason "<text>"`, into a copy → CSVs and verdict byte identical, the old folder kept as `.superseded-<stamp>` → AC-17
-- [ ] `0007-confirmation/make_table.py --compare <dir>` → 7 files whose captions start with the fold note and give n and the 3 seeds; they build in XeLaTeX with `longtable` in the preamble → AC-29
+- [ ] `0007-confirmation/make_table.py --compare <dir>` → 7 files whose captions start with the fold note and give n and the 3 seeds; they build in XeLaTeX with `longtable` and `graphicx` in the preamble → AC-29
 - [ ] Set `status` in a copy of `run.json` to anything but `ok` → exit 1, older tables unchanged → AC-29
 
 ## Value sourcing, milestone 2

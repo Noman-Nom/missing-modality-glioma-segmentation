@@ -63,7 +63,8 @@ prereg-v1: the protocol of spec 0006, fixed before any new training.
 Seen before this tag:
 - E1 val numbers, on all 15 patterns, and the E1 selection score 0.8818.
 - E3 selection score 0.8699 and E4 selection score 0.8711.
-- E3 or E4 val eval read: no.
+- E3 val eval: one case read on 2026-11-07 for a tie out during verification, BraTS-GLI-00017-000. Shown: the differences from a fresh score, and its predicted WT volume at complete input. No E3 Dice and no aggregate.
+- E4 val eval read: no.
 - 0005-strategies/compare.py --fold val run: no.
 - The test fold has not been opened.
 ```
