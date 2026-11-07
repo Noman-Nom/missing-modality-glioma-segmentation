@@ -22,7 +22,7 @@ def test_every_experiment_folder_has_scripts():
     assert {p.parent.name for p in SCRIPTS} >= {"0000-data-audit", "0001-splits",
                                              "0002-tracer-bullet",
                                              "0003-baseline", "0004-missing-eval",
-                                             "0005-strategies"}
+                                             "0005-strategies", "0007-confirmation"}
 
 
 # covers: AC-10. The working directory is an empty folder, so a script that reads

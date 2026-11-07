@@ -2,6 +2,7 @@
 AC-6 and AC-11, with no training (tests/test_strategy_runs.py runs them end to end)."""
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -14,8 +15,11 @@ from common.model import PresenceUNet, build_model, predict
 from common.runlog import config_hash, load_config
 from common.strategies import (
     append_presence,
+    draw_exposure_patterns,
     draw_patterns,
     dropout_hook,
+    expected_draw_counts,
+    exposure_hook,
     keep_batch,
     keep_image,
     presence_hook,
@@ -31,7 +35,7 @@ REPO = Path(__file__).resolve().parents[1]
 E1_CONFIG = REPO / "experiments" / "0003-baseline" / "config.toml"
 EXP = REPO / "experiments" / "0005-strategies"
 TINY = {"channels": [4, 8], "strides": [2], "num_res_units": 1}
-SEALED_HASH = "146635cf4521a239c4e8cba877528b4c688a6410cd3b817df671db4f1f57825b"
+SEALED_HASH = "0bc76bfaba23b0d7b35775038b10a28b21650e5da374de4351374dfaa617f642"
 
 
 def batch(b=3, size=4):
@@ -189,6 +193,124 @@ def test_strategy_problems():
 # covers: AC-11
 def test_the_seal_holds():
     assert protocol_hash() == SEALED_HASH
+
+
+# spec 0006, AC-3: values written down from the code before E3b was added. A change here means the
+# seed 42 runs of E3 and E4 no longer match the seeds to come, so never repin these.
+def test_old_pattern_draw_is_unchanged():
+    assert draw_patterns(np.random.default_rng(42), 12).tolist() == [
+        2, 12, 10, 7, 7, 13, 2, 11, 4, 2, 8, 15]
+
+
+OLD_MASKS = [[1, 0, 0, 1], [1, 0, 1, 0], [0, 1, 0, 1], [1, 1, 1, 1], [0, 1, 1, 0], [1, 1, 1, 1]]
+OLD_NEXT = 593941932  # what the generator gives next: the hooks use it up exactly as before
+
+
+def channel_means(out):
+    return out.mean(dim=(2, 3, 4)).int().tolist()
+
+
+def test_old_dropout_hook_is_unchanged():
+    rng = np.random.default_rng(43)
+    out = dropout_hook({"image": torch.ones(6, 4, 2, 2, 2)}, rng)["image"]
+    assert channel_means(out) == OLD_MASKS
+    assert int(rng.integers(0, 2**31)) == OLD_NEXT
+
+
+def test_old_presence_hook_is_unchanged():
+    rng = np.random.default_rng(43)
+    out = presence_hook({"image": torch.ones(6, 4, 2, 2, 2)}, rng)["image"]
+    assert channel_means(out) == [m + m for m in OLD_MASKS]
+    assert int(rng.integers(0, 2**31)) == OLD_NEXT
+
+
+# spec 0006, AC-2
+def test_e3b_config_is_e3_with_only_the_strategy_changed():
+    e3b = load_config(REPO / "experiments" / "0007-confirmation" / "e3b.toml")
+    assert e3b.pop("strategy") == {"name": "exposure", "complete_share": 0.5}
+    e3 = load_config(EXP / "e3.toml")
+    del e3["strategy"]
+    assert e3b == e3
+
+
+def test_exposure_draw_is_two_calls_in_the_fixed_order():
+    """The rule, worked by hand from the generator's own two calls."""
+    rng = np.random.default_rng(7)
+    first, second = rng.random(1000), rng.integers(2, 16, size=1000)
+    got = draw_exposure_patterns(np.random.default_rng(7), 1000, 0.5)
+    assert got.tolist() == np.where(first < 0.5, 1, second).tolist()
+
+
+def test_exposure_shares_complete_input_and_spreads_the_rest():
+    ids = draw_exposure_patterns(np.random.default_rng(1), 140000, 0.5)
+    counts = np.bincount(ids, minlength=16)
+    assert PATTERNS[1].missing == ()
+    assert counts[1] == pytest.approx(70000, abs=700)
+    assert set(ids.tolist()) == set(PATTERNS)
+    assert counts[2:].min() > 4700 and counts[2:].max() < 5300  # about 5,000 each
+
+
+def test_exposure_batch_hook_changes_only_the_drawn_channels():
+    b = batch(b=32)
+    rng = np.random.default_rng(3)
+    ids = draw_exposure_patterns(np.random.default_rng(3), 32, 0.5)
+    out = exposure_hook(b, rng, 0.5)
+    assert out["image"].shape == b["image"].shape  # 4 channels, no presence channels
+    assert {1} < set(ids.tolist())
+    for i, p in enumerate(ids):
+        assert torch.equal(out["image"][i], apply_pattern(b["image"][i], int(p)))
+    assert out["label"] is b["label"]
+
+
+def test_exposure_hooks_bind_the_share_from_the_config():
+    cfg = tiny_cfg("exposure")
+    cfg["strategy"]["complete_share"] = 0.25
+    hooks = strategy_hooks(cfg)
+    assert isinstance(hooks["batch_hook"], partial)
+    assert hooks["batch_hook"].func is exposure_hook
+    assert hooks["batch_hook"].keywords == {"complete_share": 0.25}
+    assert hooks["image_hook"] is keep_image
+    assert next(build_model(cfg).parameters()).shape[1] == 4
+
+
+@pytest.mark.parametrize("strategy, share", [("dropout", None), ("exposure", 0.5)])
+def test_expected_counts_are_the_draws_the_hook_really_makes(strategy, share):
+    section = {"name": strategy} | ({"complete_share": share} if share else {})
+    cfg = {"seed": 42, "train": {"batch_size": 2}, "strategy": section}
+    rng = np.random.default_rng(43)  # the Trainer seeds its generator with seed + 1
+    seen = []
+    hook = strategy_hooks(cfg)["batch_hook"]
+    for _ in range(50):
+        image = hook({"image": torch.ones(2, 4, 1, 1, 1)}, rng)["image"]
+        seen += [sum(2 ** i for i, x in enumerate(s) if x) for s in channel_means(image)]
+    counts = expected_draw_counts(cfg, 50)
+    assert sum(counts.values()) == 100
+    assert counts[1] == seen.count(15)  # all four channels kept means pattern 1
+
+
+# spec 0006, AC-4
+@pytest.mark.parametrize("share", [0, 1, -0.1, 1.5, float("nan"), "0.5", True])
+def test_exposure_refuses_a_share_out_of_range(share):
+    cfg = tiny_cfg("exposure")
+    cfg["strategy"]["complete_share"] = share
+    assert any("complete_share" in e for e in strategy_problems(cfg))
+
+
+def test_exposure_needs_a_share():
+    assert any("complete_share" in e for e in strategy_problems(tiny_cfg("exposure")))
+
+
+@pytest.mark.parametrize("name", ["dropout", "presence"])
+def test_other_strategies_refuse_a_share(name):
+    cfg = tiny_cfg(name)
+    cfg["strategy"]["complete_share"] = 0.5
+    assert any("complete_share" in e for e in strategy_problems(cfg))
+
+
+def test_a_good_share_passes():
+    cfg = tiny_cfg("exposure")
+    cfg["strategy"]["complete_share"] = 0.5
+    assert strategy_problems(cfg) == []
 
 
 # spec 0005, API surface: strategies imports data and missing only, so no cycle

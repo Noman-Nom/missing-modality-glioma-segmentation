@@ -21,6 +21,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 5  | Compact 3D U-Net baseline, GPU memory test (E1)      | Slice 3    | done |
 | 6  | Missing-modality evaluation, 15 patterns (E2)        | Slice 3    | done |
 | 7  | Modality dropout (E3) and presence indicator (E4)    | Slice 4    | in-progress |
+| 14 | Confirmation study: 3 seeds, cost test, E3b, test    | Slice 4    | in-progress |
 | 8  | Reduced-label study (E5), optional                   | Slice 5    | planned |
 | 9  | Self-supervised pilot (E6), optional                 | Slice 5    | planned |
 | 10 | Cross-dataset evaluation (E7), only if independent   | Slice 5    | planned |
@@ -154,6 +155,22 @@ Done when: each strategy is trained and evaluated on all 15 patterns, any claime
 - [ ] Test it: /test E3 and E4 strategies
 - [x] Review it (fresh model): /check review E3 and E4 strategies
 - [ ] Document it: /document E3 and E4 strategies
+
+### 14. Confirmation study: 3 seeds, complete input cost test, E3b, sealed test opening · GA (in-progress)
+from spec 0006. Confirm the strategy comparison at full resolution on 3 seeds, test whether dropout costs accuracy on complete input, and open the test once for all 12 models (RQ1, RQ2). Takes over the joint test opening from feature 7. Spec: [0006](../../specs/thesis/0006-multi-seed-confirmation/index.md). Code in `experiments/0007-confirmation/`.
+Done when: `prereg-v1` is public, all 12 models pass their checks, the literature gate passes, and the single test opening has run with its verdict.
+
+- [x] Design it (spec): /architect confirmation study
+- [ ] Build it: /develop confirmation study
+  - [x] E3b arm and thin thread: draw, hook, config, seal of old draws, averaged H2 lines on toy folders (AC-2 to AC-4, AC-9 to AC-11, AC-13)
+  - [ ] Cost test, exposure test, volume, rescore proof, outputs and tables (AC-7, AC-12, AC-14 to AC-18, AC-24, AC-26, AC-29)
+  - [ ] Test path: gate at the opening, sealed files, amendment path, spec 0005 retired, RQ1 steps (AC-19 to AC-22, AC-27, AC-28, AC-30, AC-31)
+  - [ ] Checks and records, then the tag and Release (AC-1, AC-5, AC-6, AC-8, AC-23, AC-25)
+  - [ ] Human runs: 9 new trainings, 12 val evals, val compare, gate, test opening
+- [ ] Verify it: /check verify confirmation study
+- [ ] Test it: /test confirmation study
+- [ ] Review it (fresh model): /check review confirmation study
+- [ ] Document it: /document confirmation study
 
 ## Slice 5: Extensions (optional)
 

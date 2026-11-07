@@ -1,4 +1,4 @@
-"""Fairness check of one E3 or E4 run against the E1 run (spec 0005, AC-12).
+"""Fairness check of one E3, E4 or E3b run against the E1 run (spec 0005, AC-12).
 
     uv run python experiments/0005-strategies/check_strategy.py <run dir> --e1 <E1 run dir>
 Exit 1, printing every failed rule, unless the run differs from E1 in the strategy alone. On a pass
@@ -10,15 +10,12 @@ needs no GPU and no case. Run check_baseline.py on the same run too: this file d
 """
 import argparse
 import sys
-from collections import Counter
 from pathlib import Path
-
-import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.missing import PATTERNS
 from common.runlog import load_config, load_run
-from common.strategies import STRATEGIES, draw_patterns, strategy_name
+from common.strategies import STRATEGIES, expected_draw_counts, strategy_name
 
 SAME_AS_E1 = ("train_cases", "val_cases", "cache_hash", "seed", "gpu", "iterations")
 
@@ -37,16 +34,6 @@ def problems(rec, cfg, e1_rec, e1_cfg):
         errors.append("config differs from E1 outside [strategy]")
     errors += [f"{k} differs from E1" for k in SAME_AS_E1 if rec.get(k) != e1_rec.get(k)]
     return errors
-
-
-def draw_counts(seed, iterations, batch_size):
-    """How many draws fell on each pattern, made the way Trainer makes them: one call per iteration
-    on a generator seeded with seed + 1 (AC-2)."""
-    rng = np.random.default_rng(seed + 1)
-    counts = Counter()
-    for _ in range(iterations):
-        counts.update(int(p) for p in draw_patterns(rng, batch_size))
-    return counts
 
 
 def main(argv=None):
@@ -70,7 +57,7 @@ def main(argv=None):
         print(f"FAIL: {e}")
     if errors:
         return 1
-    counts = draw_counts(rec["seed"], rec["iterations"], cfg["train"]["batch_size"])
+    counts = expected_draw_counts(cfg, rec["iterations"])
     print("Expected draws, recomputed from the seed, not read from the run:")
     for p in PATTERNS:
         print(f"pattern {p:2d} {PATTERNS[p].name}: {counts[p]} draws")

@@ -58,6 +58,7 @@ RESUME_KEYS = ("git_commit", "config_hash", "protocol_hash", "source_run_id",
 # a test eval must hold the same value as its val eval on each of these (AC-7, AC-16)
 VAL_MATCH_KEYS = ("protocol_hash", "config_hash", "source_best_iteration", "source_best_sha256",
                   "splits_sha256")
+PREREG_TAG = "prereg-v1"  # the current protocol tag, moved only by spec 0006, AC-31
 MAX_MEAN_DICE_DIFF = 0.001  # AC-9, per region
 MAX_CASE_DICE_DIFF = 0.01  # AC-9, per (case, region)
 

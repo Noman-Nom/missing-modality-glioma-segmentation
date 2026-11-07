@@ -299,9 +299,11 @@ def test_the_counts_are_the_draws_a_real_run_made(setup, monkeypatch):
         made.extend(int(p) for p in drawn)
         return drawn
 
-    monkeypatch.setattr(strategies, "draw_patterns", recording)
+    # _drop holds draw_patterns as its default argument (spec 0006, AC-2), so the default is swapped
+    monkeypatch.setattr(strategies._drop, "__defaults__", (recording,))
     assert train.main(with_strategy(setup, "dropout")) == 0
-    rec = load_run(only_run(setup.out))
+    run = only_run(setup.out)
+    rec = load_run(run)
     assert len(made) == rec["iterations"] * setup.cfg["train"]["batch_size"]
-    assert check_strategy.draw_counts(rec["seed"], rec["iterations"],
-                                      setup.cfg["train"]["batch_size"]) == Counter(made)
+    cfg = load_config(run / "config.toml")
+    assert strategies.expected_draw_counts(cfg, rec["iterations"]) == Counter(made)
