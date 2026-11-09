@@ -5,7 +5,7 @@
 # <run id> = "<arm> seed<N>: <reason>", for example e3 seed43, at most 2 per slot (AC-6).
 [e1]
 seed42 = "results/0003-baseline/20261103-023817-f9b3afb6"
-seed43 = ""
+seed43 = "results/0007-confirmation/runs/20261108-013008-fe831acb"
 seed44 = ""
 
 [e3]
