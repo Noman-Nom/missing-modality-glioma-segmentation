@@ -105,11 +105,18 @@ Items are from section 1. D counts when backbone and split are shared. No paper 
 | 3.14 | Liu 2023 (M3AE) | yes | 15 | no | yes**** | yes | yes | 5 | new method; ablation swaps zero, mean and learned fill |
 | 3.15 | Sun 2024 ("Unveiling") | yes | 15 | no | no | no | no | 2 | new method, one model per subset |
 | 3.16 | Giang 2026 (CMA-mmFormer) | yes | 6 | not usable | no | no | yes | 3 | unreliable, see the note |
+| 3.17 | Azad 2022 (SMU-Net) | yes | 15 | no | unclear | no | no | 2 | new network, baselines of unstated source |
+| 3.18 | Wang 2021 (ACN) | yes | 15 | no | yes | no | yes | 4 | dedicated models against rerun catch-all models |
+| 3.19 | Wang 2023 (ShaSpec) | yes | 15 | no | no | no | no | 2 | new network, baselines copied from other test sets |
+| 3.20 | Shi 2024 (PASSION) | yes | not stated | no† | yes | no | yes | 3 | baseline, + ModDrop, + PMR, + PASSION, under imbalanced missing training data |
+| 3.21 | Wang 2023 (ProtoKD) | yes | 4 | no | yes | yes‡ | no | 3 | distillation against single modality models |
 
 \* Per patient differences with Bonferroni adjusted p values, but the main text names the test only for risk scores. Table S1 was not opened.
 \** Read from Figure 2 in extracted text, whole tumour only. Check against the PDF.
 \*\*\* Wilcoxon, p < 0.05, against U-HeMIS only. The paper does not test U-HVED against the subset models, and does not say the test is paired.
 \*\*\*\* The shared backbone holds for the ablation table only, which is on the validation split.
+† Dropout is a separate arm, but the baseline trains on incomplete data, so it is not our zero fill arm. Only one of our three strategies is present.
+‡ Paired t-test, but the table does not say what each star is compared with.
 
 ### What the 10 papers agree on
 - **Zero fill on a complete input model fails when a key sequence is missing.** CAPS: mean Dice 63.71 against 83.45 with dropout, over the 4 single missing cases. Öchsner: WT Dice 60.4% against 92.6% without FLAIR. Cai: Macro-14 0.3367 against 0.5249.
@@ -136,6 +143,17 @@ Evidence is thin, and it is the weakest part of the literature:
 3. **The fill value can matter.** M3AE: 74.4 with zero fill, 45.2 with the mean image, under min-max scaling.
 4. **Quality of evidence is uneven.** Two of the six new papers have internal number errors (3.15, 3.16). Check tables before citing a number. Copied baselines are common (3.13, 3.15, 3.16), and these are not paired comparisons.
 5. **Statistics stay our strength.** Of the 16, only Cai, Öchsner, Chrysochoou, M3AE and U-HVED report a paired style test, and only Chrysochoou adjusts for multiple tests.
+
+### Update after 21 papers (2026-11-10, provisional)
+
+The five new papers (3.17 to 3.21) are all new methods, not strategy comparisons. None changes the first answer in section 2.
+
+1. **Copied baselines from other test sets are common, even at CVPR.** ShaSpec scores itself on the online validation set and copies baselines scored on other splits. SMU-Net does not say where its baseline numbers come from. Same subject comparison is still uncommon, which supports our framing.
+2. **One new piece of dropout evidence goes the other way, in a different setting.** In PASSION, ModDrop on mmFormer lowered mean Dice in 5 of 6 settings (−1.38 to +0.66) and raised HD in all 6, when the training data itself had missing modalities. Our training data is complete, so this does not contradict 3.1 to 3.5. One run, no test.
+3. **Post-processing can look like a method gain.** ShaSpec's connected component step alone added up to 2.5 Dice on ET. Our arms use no post-processing, and that must stay the same for all arms.
+4. **Dedicated models are a strong reference we do not include.** In ProtoKD, a model trained on one modality beat U-HVED by 9 to 24 points. ACN trains 15 dedicated models. This is a limit of RQ2 to state, not a new arm.
+5. **Statistics**: of the 21, only ProtoKD adds a paired test (a t-test, with unclear comparisons). Still no multiplicity correction outside Chrysochoou.
+6. **Number errors again.** SMU-Net's Table 1 and Figure 5 disagree on the order of SMU-Net and ACN at full input (85.2 against 84.0 in the table, 83.8 against 85.1 in the figure). That makes three of 21 papers with internal number errors (3.15, 3.16, 3.17).
 
 ## 3. Paper notes
 
@@ -301,6 +319,63 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
   - The zero fill and dropout arms are not described anywhere.
 - **For us**: the idea of separating a missing modality from a degraded one is interesting, and is outside our scope. Its numbers are not evidence.
 
+### 3.17 Azad, Khosravi, Merhof 2022 (SMU-Net), arXiv `2204.02961`
+- **Status**: read in full (arXiv v1, marked "Under Review for MIDL 2022"). Publication not confirmed. OpenAlex gives an RWTH repository DOI `10.18154/rwth-2022-07632`.
+- **Data and split**: BraTS 2018, 285 subjects, "pre-processing and data division follow" U-HVED. Input 160×192×128.
+- **Backbone**: two parallel 3D U-Nets (full input path and missing input path), co-trained, plus a style discriminator. Adam, lr 1e-4, batch 1, 250 epochs, one RTX 3090. Only the missing input path is used at inference.
+- **Arms**: SMU-Net against U-HeMIS, HVED and ACN. The paper says "identical settings for all four", but does not say whether the baselines were rerun. Its ACN numbers differ from the ACN paper (3.18), for example T2 only WT 85.4 here against 85.55 there, so they are not a straight copy. Their source is not given.
+- **Training per pattern**: not stated. The design (a missing input path for a subset M′) suggests one model per pattern, like ACN.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds.
+- **Result**: mean Dice 85.9, 77.9, 61.8 (WT, TC, ET), against ACN 85.3, 76.8, 60.7. Single modality average (Table 3) 69.4 against 68.5 for ACN and 57.3 for a single modality U-Net.
+- **Internal errors found** (my arithmetic from Table 1):
+  - Full input, mean of the three regions: Table 1 gives SMU-Net 85.2 and ACN 84.0. Figure 5 gives 83.8 and 85.1, the opposite order.
+  - U-HeMIS on T1 only: 34.9 from Table 1, 16.7 in Figure 5 and Table 3. On T2 only: 51.0 against 36.0.
+  - U-HeMIS TC mean row says 59.7. The 15 rows give 60.95.
+  - SMU-Net on T1 only: 63.6 in Figure 5, 63.3 in Table 3.
+  - The ablation (Table 2) is run on FLAIR only, and no validation set is described, so module choices may have been made on the reported data.
+- **For us**: little. One more knowledge distillation method with small gains over ACN and no test. Do not use its numbers without checking.
+
+### 3.18 Wang, Zhang, Liu, Lin, Tian, Zhong, Shi, Fan, He 2021 (ACN), MICCAI. Doi `10.1007/978-3-030-87234-2_39` (from OpenAlex)
+- **Status**: read in full (arXiv `2106.14591` v2).
+- **Data and split**: BraTS 2018, 285 subjects, random 2:1 split into training and validation. Results are on that validation part. No separate test set.
+- **Backbone**: the 3D U-Net of the BraTS 2018 winner, two paths (full input and missing input), two discriminators, a mutual information module. Patch 160×192×128, batch 1, Adam, lr 1e-4 with poly decay, 300 epochs, one V100.
+- **Arms**: ACN against U-HeMIS and U-HVED ("U-Net is applied as the benchmark to all methods", so they appear to be rerun on the same backbone and split), and against KD-Net on the four single modality cases.
+- **Training per pattern**: yes. "A series of independent yet related models are trained dedicated to each missing situation", so 15 dedicated models. The authors name this training cost.
+- **Patterns and metrics**: all 15. Dice and HD95 per region. "Significantly" is used, but no test is named. One run, no seeds.
+- **Result**: mean Dice ET 61.21, TC 77.62, WT 85.92 (U-HeMIS 46.10, 62.57, 74.05; U-HVED 46.76, 64.84, 79.16). Mean HD95 7.37, 8.13, 7.62. Without T1ce, U-HeMIS and U-HVED reach only about 10 to 30 on ET; ACN about 42 to 47. Table 1 averages check out, except WT 85.92 printed against 86.00 from the rows.
+- **Copying downstream**: ShaSpec (3.19) copies its U-HeMIS, U-HVED, KD-Net and ACN numbers from this paper to the decimal.
+- **For us**: background. Dedicated models are a different family from our three strategies. But its table shows how badly a catch-all model can fail on ET without T1ce, which matches what we expect for E1 (RQ1).
+
+### 3.19 Wang, Chen, Ma, Avery, Hull, Carneiro 2023 (ShaSpec), CVPR. Doi `10.1109/cvpr52729.2023.01524` (from OpenAlex)
+- **Status**: read in full (arXiv `2307.14126` v2).
+- **Data and split**: BraTS 2018. Trained on all 285 training subjects "without model selection", 180,000 iterations. Scored on the 66 case official validation set through the online system.
+- **Backbone**: 3D U-Net with one shared encoder and one specific encoder per modality, fused at the bottleneck. SGD with Nesterov momentum 0.99, lr 1e-2, cosine decay. A missing modality's feature is the mean of the shared features of the present ones, so this is feature level filling, not zero fill.
+- **Arms**: ShaSpec, with and without a post-processing step (connected components, small region removal, called ShaSpec*). Non-dedicated training drops modalities at random; the rate is not given.
+- **Baselines are copied, from other test sets.** U-HeMIS and U-HVED match ACN Table 1 to the decimal (for example 11.78, 23.80 on ET with FLAIR only), and mmFormer matches the mmFormer paper (complete input 77.61, 85.78, 89.64). Those were scored on ACN's internal hold out (one third of the 285) and on mmFormer's own split. ShaSpec was scored on the online validation set. So the table compares different subjects.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds.
+- **Result**: mean Dice ET 61.58, TC 77.45, WT 85.92; ShaSpec* 63.08, 77.88, 86.26. The post-processing alone moved ET with T1 plus T1c from 75.76 to 78.26.
+- **For us**: two cautions. First, a "+2.5 Dice on ET" claim can come from post-processing, so we must keep post-processing identical across arms (we use none). Second, it is a widely cited CVPR paper whose main table compares numbers from different test sets. Fair comparison on the same subjects is not the norm even in strong venues, which supports our framing (RQ2).
+
+### 3.20 Shi, Shang, Sun, Yu, Yang, Yan 2024 (PASSION), ACM MM. Doi `10.1145/3664647.3681543` (from OpenAlex)
+- **Status**: read in full (main paper, no supplement).
+- **Question**: training data where modalities are missing at different rates (imbalanced), and missing inputs are never seen in training. The authors call this imperfect data training (IDT), against perfect data training (PDT), where all training cases are complete.
+- **Data and split**: BraTS 2020, 369 subjects, 219 train, 50 validation, 100 test. Also MyoPS 2020 (cardiac, 25 cases, 2D), out of our scope. Resampled to 1 mm³, cropped, z-scored per volume.
+- **Backbone**: mmFormer for the main table; RFNet and M2FTrans for a plug-in test. AdamW, lr 2e-4, batch 1, 300 epochs, RTX 3090. Missing inputs are dropped and their encoded features set to zero vectors.
+- **Arms (same backbone and split)**: baseline, +ModDrop, +PMR (a modality balancing method), +PASSION, under six missing rate settings. Rates for (T1 and T1c, FLAIR, T2) are permutations of 0.2, 0.5, 0.8.
+- **Patterns and metrics**: Dice and HD per region. The text does not say clearly which test patterns the table averages (probably all 15, as in mmFormer; not confirmed). No test, no seeds.
+- **Result for dropout** (my arithmetic from Table 1, BraTS mean Dice): ModDrop minus baseline is −0.46, +0.66, −1.38, −0.33, −0.12 and −0.47 over the six settings. Mean HD got worse in all six, for example 14.35 to 16.03 mm and 17.10 to 22.72 mm. The authors: ModDrop "even brings negative effects". PASSION gains about 1.3 to 2.9 Dice over the baseline and lowers HD by about 4 to 9 mm. The PDT baseline (complete training data) is 70.58.
+- **Note**: the baseline is not our zero fill arm, because its training data already has missing cases. And the mmFormer backbone already has built-in modality dropout.
+- **For us**: the only paper so far where ModDrop is a separate arm on the same backbone and split and does not help. The setting differs from ours (our training data is complete), so it does not contradict 3.1 to 3.5. It is a reason to report HD95 next to Dice: in PASSION, dropout hurt the distance measure more than Dice (RQ1, RQ2). One run, no test, so it is weak evidence.
+
+### 3.21 Wang, Yan, Zhang, Wei, Li, Li 2023 (ProtoKD), ICASSP. Doi `10.1109/icassp49357.2023.10095014` (from OpenAlex)
+- **Status**: read in full (arXiv `2303.09830` v2, 4 pages).
+- **Data and split**: BraTS 2018, 285 subjects, 70% train, 10% validation, 20% test. Model selection on validation (highest Dice). The only paper in this batch with a separate validation and test split.
+- **Backbone**: VNet. Teacher trained on all four modalities for 1,000 epochs, batch 4, Adam. Then a student per single modality, 1,000 more epochs, with pixel and prototype distillation.
+- **Arms**: Unimodal (a VNet trained on one modality only), U-HVED, KD-Net, PMKL (rerun on the same VNet from public code), ProtoKD. Whether U-HVED and KD-Net were rerun is not stated; the U-HVED row has only one decimal of precision, which suggests a copy.
+- **Patterns and metrics**: the 4 single modality cases only. Dice only. Paired t-test, p ≤ 0.05. The table marks some baselines with a star too, and does not say what each star is compared with. One run, no seeds.
+- **Result** (mean of WT, TC, ET): Teacher, full input, 80.93. ProtoKD against Unimodal: T1 63.07 against 58.77, T2 65.82 against 64.91, T1ce 77.39 against 73.69, FLAIR 64.17 against 62.07. U-HVED: 34.43, 55.27, 64.87, 52.43.
+- **For us**: a simple model trained on one modality beats the catch-all U-HVED by 9 to 24 points here, and the distillation method adds only 0.9 to 4.3. A dedicated model is a strong reference that our three arms do not include. Worth one sentence in the discussion as a limit of RQ2, not a new arm.
+
 ## 4. Record of this search
 
 - 16 logged searches: the 8 fixed queries, then 8 title searches for web finds and for known papers. 387 candidates.
@@ -338,8 +413,9 @@ What this means:
 
 ## 6. Next
 
-16 of at least 50 papers read. Read next:
-- Downloaded, not read: SMU-Net (`W4226508841`), ACN (`W3203976604`), ShaSpec (`W4386071994`), PASSION (`W4403780759`), ProtoKD (`W4372265364`).
+21 of at least 50 papers read (SMU-Net, ACN, ShaSpec, PASSION and ProtoKD read 2026-11-10). Read next:
+- Downloaded, not read: none. The next batch needs new downloads.
+- Cited by the papers just read, worth finding: KD-Net (Hu et al. 2020), PMKL (Chen et al.), Robust-MSeg / RbSeg (Chen et al. 2019), M2FTrans, PMR (modality balancing), SMIL (Ma et al.). Search by title first.
 - No copy yet: RFNet (`W3203934147`) and Qiu 2025 (`W4406137843`). Check by title on arXiv first, then ask the human. Zhou 2023 survey (`W4313340471`, closed).
 - Reviews: Azad 2022 (`W4221154584`), and the two failed downloads above.
 - Still to find: IM-Fuse, Neverova ModDrop, Feng (ModDrop in MS).
