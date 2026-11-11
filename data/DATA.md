@@ -40,6 +40,7 @@ Source: `experiments/0000-data-audit/`, output `results/0000-data-audit/cases.cs
 - **Why a tar with an odd name.** Kaggle unpacks `.zip` files and every `.nii.gz` inside them on upload. It writes plain `.nii` files, and where the gzip header carries an old file name it makes a folder, for example `BraTS-GLI-00011-000-t1c.nii/00000055_brain_t1ce.nii`. Our loader reads only `*.nii.gz`, so it would find nothing. With the two stray folders present, processing failed outright (tested 2026-11-01 with 3 cases: with the strays it failed, without them it passed). A `.tar.bin` is stored as one unopened file (tested with 1 case: same byte count on Kaggle).
 - **Left out.** The two stray folders `BraTS-GLI-00011-000/BraTS-GLI-00011-000-t1n.nii/` and `BraTS-GLI-00014-000/BraTS-GLI-00014-000-t2w.nii/`. They hold one raw `.nii` each and are not read by any script. The official zip from Synapse does not contain them (7507 entries, against 7511 in the local folder), so they were most likely made by an earlier local unpack.
 - **Terms.** The BraTS 2023 terms above are still "to confirm". Confirm that they allow a private copy on Kaggle before the thesis is submitted.
+- **Shared with.** Decided by the human 2026-11-11: the dataset is shared, still private, with one project group member through Kaggle's dataset sharing, so they can run some spec 0006 step 3 trainings on their own GPU quota. Kaggle username: to fill in. Not shared with anyone else. The same terms check covers this sharing.
 
 ## E1 model on Kaggle (for E2, ADR 0002)
 
