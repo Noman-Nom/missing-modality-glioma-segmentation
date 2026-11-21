@@ -163,7 +163,7 @@ The ten new papers (3.22 to 3.31) are nine in scope and one background paper (Mo
 2. **Dropout is not one thing, again.** Robust-MSeg drops each code with probability 0.5 (complete input 1 in 16, near E3). ModDrop drops at 0.1 (about 2 in 3 complete). Shen and Gao drop exactly one modality and also train on complete input in every step. RFNet, DC-Seg and AdaMM do not give the rate. So "dropout" in a related work sentence must name its exposure.
 3. **Collapse without key inputs repeats.** A channel stacked ViT trained on complete input with missing input filled by background fails without FLAIR (WT 5.29, 3.30). LCR-Net's single input collapse (3.29) looks the same, but its training is not described, so it is not evidence.
 4. **Same split is not paired.** RFNet's 219, 50, 100 split is the most reused one (3.14, 3.20, 3.25, 3.26), but later papers copy RFNet's numbers rather than score the same subjects under each arm. Copied baselines again in 3.22, 3.23, 3.26, 3.29.
-5. **No real benchmark yet.** AdaMM (3.31) calls itself a systematic evaluation of six method families, but it has no validation split, no seeds, no paired test, no plain zero fill or dropout arm, and a likely T1 and T1c swap in three baselines. Section 6 still needs a real benchmark.
+5. **No real benchmark yet.** AdaMM (3.31) calls itself a systematic evaluation of six method families, but it has no validation split, no seeds, no paired test, no plain zero fill or dropout arm, and pattern columns that look mislabelled for several baselines. Section 6 still needs a real benchmark.
 6. **Number problems: now 7 of 31** (3.15, 3.16, 3.17, 3.23 claim against table, 3.25, 3.27, 3.31). Check every number before citing it.
 7. **Statistics**: none of the ten reports a paired test. The paired style list stays Cai, Öchsner, Chrysochoou, M3AE, U-HVED and ProtoKD, with multiplicity correction only in Chrysochoou.
 
@@ -392,7 +392,7 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - **Status**: read in full (arXiv `2002.09708` v1).
 - **Data and split**: BraTS 2015, 274 training subjects. Full input scored on the 110 case online test set. Missing patterns scored on "the same data split of BRATS training set as in" HeMIS.
 - **Backbone**: 3D U-Net with one content encoder and one appearance encoder per modality, reconstruction decoders, and a learned gate that fuses the content codes at each level. 80³ patches, batch 1, Adam, lr 1e-4 with poly decay. Z-score inside the brain.
-- **Dropout rule**: each modality's content code is set to zero with probability 0.5, independently, in latent space, not at the input. By my arithmetic the complete input is drawn 1 in 16, close to E3's 1 in 15. All four codes are also dropped together 1 in 16, and the paper does not say what happens then.
+- **Dropout rule**: each modality's content code is set to zero with probability 0.5, independently, in latent space, not at the input. The paper draws this "in each downsampling stage" and does not say whether one draw is shared across stages. If it is one draw per iteration, by my arithmetic the complete input is drawn 1 in 16, close to E3's 1 in 15, and all four codes are dropped together 1 in 16, a case the paper does not explain.
 - **Arms**: the method against HeMIS and HeMIS's imputation MLP. Those numbers are "directly referenced" from the HeMIS paper, not rerun. I checked them against HeMIS (3.11): the complete input, T2, T1c and FLAIR rows match to the decimal.
 - **Patterns and metrics**: all 15. Dice only for missing patterns. No test, no seeds.
 - **Result**: means over 15 patterns 84.45, 69.19, 57.33 (whole, core, enhancing), against HeMIS 68.22, 54.07, 43.86. Complete input 89.07, 81.19, 79.13. All nine column means in Table 2 check out (my arithmetic).
@@ -480,7 +480,7 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - **Status**: read in full (arXiv `2509.11442` v2).
 - **Data and split**: BraTS 2021 glioma with UPENN-GBM, UCSF-PDGM, LUMIERE, Rembrandt, EGD, TCGA and BraTS 2023 metastasis, "patient overlaps between BraTS'21 and other sources are removed". Glioma segmentation 2,676, 536, 358, plus 252 in-house external cases.
 - **Backbone**: ViT-B/16 pretrained as a multimodal masked autoencoder for 1,200 epochs (75% of tokens masked, split over modalities by a Dirichlet draw, so a whole modality can be masked), then a UNETR decoder finetuned for 100 epochs. Finetuning sees complete input only.
-- **Arms**: this model against a ViT with the four modalities stacked as channels, MAE pretrained. In the ViT a missing modality is "filled with background intensities", which is close to zero fill.
+- **Arms**: this model against a ViT with the four modalities stacked as channels, MAE pretrained. In the ViT a missing modality is "filled with background intensities". The normalisation is not stated, so the fill value is not known (M3AE, 3.14, shows the fill value can matter).
 - **Patterns and metrics**: 5 (complete input and the four drop one patterns). Dice only. No test, one run.
 - **Result (frozen encoder, internal test)**: complete input WT 82.78 against 80.40. FLAIR missing, WT 16.69 against 5.29. T1 missing, WT 79.03 against 47.85.
 - **Closeness score (full text)**: 1 (A).
@@ -494,7 +494,10 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - **Patterns and metrics**: all 15. Dice, HD95, IoU, sensitivity per region. No test, no seeds. The "Std." column is the spread over the 15 patterns, not over runs.
 - **Result (BraTS 2024, means over 15)**: AdaMM 83.90, 64.49, 63.54 (WT, TC, ET). Complete input 88.69, 78.58, 79.32.
 - **Problems found (my reading and arithmetic)**:
-  - Possible channel swap: for ACN, SMUNet and RMBTS, ET with T1 alone is far above ET with T1c alone (ACN 59.51 against 21.23). It is the other way round for every other model. This suggests T1 and T1c were swapped in some baselines. Not confirmed.
+  - The pattern columns of several baselines look mislabelled. Not confirmed.
+    - ACN, SMUNet and MMCformer: ET is high wherever T1 is present and low wherever it is not, as if T1 and T1c were swapped. ACN T1 alone 59.51 against T1c alone 21.23; MMCformer FLAIR+T1+T2 62.16 against FLAIR+T1c+T2 28.65.
+    - RA-HVED: ET follows T2 instead, as if T1c and T2 were swapped. T2 alone 53.54 against T1c alone 15.79; T1+T2 49.97 against T1+T1c 18.06.
+    - RMBTS and XLSTM-HVED fit no single swap: RMBTS FLAIR+T1c+T2 (no T1) 59.68, XLSTM-HVED T1+T1c+T2 17.03 against FLAIR+T1+T2 52.96.
   - The ablation "w/o GARM" ET row has 40.89 for T1 plus T1c, where its neighbours are about 76. The printed mean of 60.29 fits a value near 77.3, so the cell is likely a typo.
   - LCKD WT mean printed 80.15, rows give 80.35. Some Std. values use the population formula, some the sample one.
   - The threshold τ and the loss weights are chosen by tables on the 80/20 test split, since there is no validation split.
@@ -512,6 +515,7 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - OpenAlex answered HTTP 429 (too many requests) on many tries, likely the shared free daily budget in ADR 0003. These title searches failed and are **not** in the log: M2FTrans (three tries), "PMR prototypical modal rebalance", the RFNet title, and "Feng modality dropout multiple sclerosis". A free OpenAlex key (ADR 0003, set by the human through an environment variable) would fix this.
 - arXiv was searched by title through its public API, by hand, not logged in `search-log.csv` because the tool logs OpenAlex only: M2FTrans, IM-Fuse and "Does Adding a Modality Really" have no arXiv match; RFNet no match; SMIL is `2103.05677`; PMR is `2211.07089`; "ModDrop" with "sclerosis" finds only ModDrop++; "benchmark missing segmentation" finds `2503.18445`, which is RGB-D scene segmentation, out of scope.
 - 15 papers requested through the tool: 9 downloaded, 4 `not_pdf` (SMIL `W3176404283`, IM-Fuse `W4414351039`, `W4415016743`, `W7125253548`), 2 `failed` (`W7213990777`, `W4360614210`). RFNet was read from the CVF open access site, outside the tool (note 3.25); its row still says `no_open_copy`. KD-Net was read through its arXiv row (`W3169291543`), its DOI taken from the venue row (`W3090336986`).
+- Web searches in this round: 0.
 - 10 read: 3.22 to 3.31.
 
 **Departures in this round, stated plainly:**
@@ -557,7 +561,7 @@ Checked 2026-11-21 against papers 22 to 31: none of them narrows this gap (see "
   - Qiu et al. 2025, "Does Adding a Modality Really Make Positive Impacts in Incomplete Multi-Modal Brain Tumor Segmentation?", TMI, `W4406137843`, doi `10.1109/tmi.2025.3526818`. Not on arXiv by title. The closest title to our question so far.
   - PMKL, "Learning With Privileged Multimodal Knowledge for Unimodal Segmentation", TMI, `W3206034503`, doi `10.1109/tmi.2021.3119385`.
   - IM-Fuse, `W4414351039`, doi `10.1007/978-3-032-04984-1_22`: the open link is not a PDF, and there is no arXiv match by title.
-  - M2FTrans: not in `candidates.csv` (the title search failed with 429) and no arXiv match. Retry the title search first; ask only if it still has no open copy.
+  - M2FTrans: not in `candidates.csv` (the title search failed with 429) and no arXiv match. AdaMM's reference list gives it as Shi, Yu, Cheng, Yang, Cheng, Yan, "M2FTrans: Modality-masked fusion transformer for incomplete multi-modality brain tumor segmentation", IEEE Journal of Biomedical and Health Informatics 28 (2023) 379 to 390 (not checked; no DOI taken from it). Retry the title search first; ask only if it still has no open copy.
   - Feng (ModDrop in MS): not found by a guessed title. The human should give the full title or authors.
 - Out of scope, open on arXiv, read only if a strategy paper relies on them: SMIL (`2103.05677`), PMR (`2211.07089`).
 - Open and in scope, not read yet (picked by title, score them from the abstract first): MedMAP / "Mind the Gap" (`W4413360068`, `W4406262216`), Multimodal MAE pretraining for missing modalities (`W4410081345`), MGML (`W7117236435`), CCSD (`W7160394731`), Hölder divergence (`W4416895193`), "Brain Tumor Segmentation for Multi-Modal MRI with Missing Information" (`W4381326261`), Scalable Swin (`W4391469551`), integrated glioma framework (`W4415466521`).
