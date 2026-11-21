@@ -106,7 +106,7 @@ Milestones 1 to 3 of 5 built 2026-11-06 on branch `feat/e3-e4-strategies` (build
 - Not run yet: the val comparison (it waits for `prereg-v1`, and for the rescored evals with the volume columns). The joint test opening is retired by spec 0006.
 
 ## K. Literature tools (ADR 0003)
-`0006-literature/fetch_papers.py`, built 2026-11-07: `search` asks OpenAlex and logs to `docs/literature/search-log.csv` and `candidates.csv`; `download` keeps real open access PDFs in `~/literature-pdfs`, outside git, with a text copy. Closed papers get `no_open_copy`, for the human. Toy tests in `tests/test_fetch_papers.py`, plus one live trial in a scratch folder. Used for the review: 31 papers read by 2026-11-21 (`docs/literature/review-notes.md`).
+`0006-literature/fetch_papers.py`, built 2026-11-07: `search` asks OpenAlex and logs to `docs/literature/search-log.csv` and `candidates.csv`; `download` keeps real open access PDFs in `~/literature-pdfs`, outside git, with a text copy. Closed papers get `no_open_copy`, for the human. Toy tests in `tests/test_fetch_papers.py`, plus one live trial in a scratch folder. Used for the review: 41 papers read by 2026-11-21 (`docs/literature/review-notes.md`).
 
 ## L. Confirmation study (spec 0006, in progress)
 Built 2026-11-07, milestones 1 to 3 of 5. Toy folders only, no number here is a result.

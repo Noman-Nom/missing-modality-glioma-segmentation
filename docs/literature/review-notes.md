@@ -167,6 +167,18 @@ The ten new papers (3.22 to 3.31) are nine in scope and one background paper (Mo
 6. **Number problems: now 7 of 31** (3.15, 3.16, 3.17, 3.23 claim against table, 3.25, 3.27, 3.31). Check every number before citing it.
 7. **Statistics**: none of the ten reports a paired test. The paired style list stays Cai, Öchsner, Chrysochoou, M3AE, U-HVED and ProtoKD, with multiplicity correction only in Chrysochoou.
 
+### Update after 41 papers (2026-11-21, provisional)
+
+The ten new papers (3.32 to 3.41) are all in scope, so 40 in scope plus ModDrop as background. None changes the first answer in section 2. None tests the complete input cost, so the gap in section 5 stays open, but one paper changes how we may frame our work.
+
+1. **"First on BraTS 2023" is taken.** IM-Fuse (3.32) retrains seven published methods on BraTS 2023 GLI at 128³, with a 70/10/20 split, validation-based model selection and published split lists, and calls this "the very first extensive benchmarking" there. It is a benchmark of methods with their own recipes, not of training strategies on one backbone: Dice only, one run, no test, and no plain model trained on complete input only. So our claim must rest on a controlled strategy comparison, the complete input cost, seeds and paired statistics, not on the dataset.
+2. **Still no test of the complete input cost.** No new paper has an arm without dropout. Two more designs keep complete input in every step (CCSD 3.35, like Shen and Gao 3.28), which suggests some authors expect a cost, but none measures it.
+3. **Closest to a presence arm so far, but confounded.** Meta-D (3.39) masks missing modalities in attention using sequence metadata, against mmFormer's zeroed features: +1.19 mean Dice, +5.12 with T1 only. The architecture changes too, at 64³, one run.
+4. **Dedicated models again.** BM-MAE (3.38) fine-tunes one model per subset; a FLAIR only model reaches WT 90.3. This strengthens the RQ2 limit in the 21 paper update (point 4).
+5. **Paired tests: two more, both without correction.** IMS2Trans (3.37) runs 45 per subject Wilcoxon tests against mmFormer; under Holm only one would pass (my arithmetic). BM-MAE (3.38) runs 45 per arm. The paired style list is now Cai, Öchsner, Chrysochoou, M3AE, U-HVED, ProtoKD, IMS2Trans and BM-MAE. Multiplicity correction is still only in Chrysochoou (and, by its abstract, in GlioMODA, not read).
+6. **Number problems: now 14 of 41.** New: 3.32 (ShaSpec means), 3.33 (Table I cells, Total Avg.), 3.34 (wrong baseline source), 3.35, 3.36, 3.38, 3.40 (claim against table, duplicated rows). The tables of 3.39 and 3.41 check out. The pattern tables of 3.37 were not checked by script; it tunes a loss weight on its test set. Copied or wrongly sourced baselines in 3.34, 3.35, 3.36 and 3.37.
+7. **Seeds**: none of the ten new papers reports runs over several seeds. MGML (3.34) says one fixed seed removes "inter-run variation", which mixes up rerun noise and seed variance. Worth one sentence in our methods chapter.
+
 ## 3. Paper notes
 
 Bibliographic details below are copied from the papers. None is in `writing/refs.bib` yet, so none may be cited in a chapter until it is added and verified.
@@ -504,6 +516,130 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - **Closeness score (full text)**: 3 (A, B, F).
 - **Gap (section 5)**: does not narrow it, and it is **not the benchmark section 6 asks for**. It compares published methods, not training strategies on one backbone. It has no plain zero fill or plain dropout arm, no validation split, no seeds and no paired test.
 
+### 3.32 Pipoli, Saporita, Marchesini, Grana, Ficarra, Bolelli 2025 (IM-Fuse), MICCAI, LNCS. Doi `10.1007/978-3-032-04984-1_22` (from candidates.csv)
+- **Status**: read in full (MICCAI 2025 open access copy, `~/literature-pdfs/W4414351039.pdf`). Table 1 checked against a rendered image of page 7, because the column header is garbled in the text copy.
+- **Data and split**: BraTS 2023 GLI, 1,251 volumes, split 70/10/20 into train, validation and test. The split lists are published with the code. Each model is selected on validation and scored once on test. **Our dataset.**
+- **Backbone**: per modality 3D U-Net style encoders with transformers, a Mamba fusion block in the bottleneck and the skips, a shared decoder regulariser (from mmFormer). 128³ input, batch 2, RAdam, lr 2e-4, poly decay, 1,000 epochs, L40S GPUs.
+- **Missing inputs in training**: Bernoulli indicator per modality, "following" mmFormer; features of a missing modality are zeroed. The drop rate is **not stated in the paper**.
+- **Arms**: U-HVED, RobustSeg, mmFormer, SFusion, ShaSpec, M3AE, M3FeCon and IM-Fuse, all **retrained** on the same split. But each keeps "the same preprocessing, augmentation, optimizer, scheduler, and hyperparameters as described in their respective original papers", with iterations scaled to the same number of epochs. So same subjects, different recipes.
+- **Patterns and metrics**: all 15. Dice only. One run, no seeds, no test.
+- **Result (means over 15)**: IM-Fuse 74.3, 85.5, 90.2 (ET, TC, WT); mmFormer 73.6, 84.7, 90.0; M3AE 73.2, 85.1, 89.6. The leading three differ by under 1 point, with no test.
+- **Internal error (my arithmetic, confirmed on the page image)**: the ShaSpec row means are printed 69.2, 82.8 and 88.8 (ET, TC, WT). Its 15 cells give 69.41, 83.13 and 88.91. The other 21 row means check out to rounding.
+- **Not to repeat**: "all models achieved an average improvement of 8 Dice points by training on BraTS2023 compared to BraTS2018" compares different test sets.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow the complete input cost gap: there is no plain model trained on complete input only, so no with and without comparison. IM-Fuse itself uses Bernoulli dropout; how each rerun baseline simulates missing input is left to its original recipe. But it changes our framing: it claims "the very first extensive benchmarking" on BraTS 2023, our dataset, at our input size (128³). So "first on BraTS 2023" is not open to us. It is a benchmark of **methods**, not of **training strategies**: recipes differ by arm (fails D), Dice only (fails F), one run, no test. It is the best method benchmark read so far, better than AdaMM (3.31) because it has a validation split and published splits. Its split could be reused for a check against our numbers, but our protocol is fixed and this is not proposed.
+
+### 3.33 Liu, Tan, Chen, Yang, Jiang, Huang 2025 (MedMAP), IEEE JBHI. Doi `10.1109/jbhi.2025.3600496` (from candidates.csv)
+- **Status**: read (arXiv `2408.09465` v1). Method, setup, all results text and Tables I and II read closely; the theory section skimmed.
+- **Conference version**: "Mind the Gap" (Liu, Tan, Jiang, Yang, Huang 2024, BIBM, doi `10.1109/bibm62325.2024.10822387`, from candidates.csv, `W4406262216`). Same authors and method, BraTS 2018 and knowledge distillation only. Its tables were read to check MedMAP. **It is not counted as a separate paper.**
+- **Data and split**: BraTS 2018 with the ProtoKD split; BraTS 2020 with three fold cross validation.
+- **Method**: an alignment loss that pulls each modality's latent features to an anchor distribution, plugged into PMKL (distillation), mmFormer (shared latent space) and ACN (domain adaptation). Each is retrained with and without it, with the authors' settings except batch size.
+- **Arms**: each backbone with and without the alignment loss. Same backbone and split per pair, which is a fair design for a plug-in, but not a strategy comparison.
+- **Patterns and metrics**: all 15 (four single inputs shown, two and three input patterns as group means). Dice only. No test, no seeds.
+- **Result**: mean Dice gains of 3.68, 7.67, 2.30 on BraTS 2018 and 1.31, 6.76, 0.38 on BraTS 2020 (PMKL, mmFormer, ACN).
+- **Problems found (my arithmetic)**:
+  - Table I, BraTS 2020, "with" row: mmFormer is printed 74.76 and ACN 76.41. The region means of Table II give 79.70 for mmFormer and 74.76 for ACN. The printed gains (6.76, 0.38) fit Table II, so the two cells look misplaced.
+  - Table II "Total Avg." is not the mean over the 15 patterns. For PMKL on BraTS 2018 the conference version prints the 15 values, whose means are 77.82, 68.22, 55.89 (WT, TC, ET), and its own Total Avg. matches them. MedMAP shows the same group means but prints 77.32, 66.60, 52.39. How MedMAP's column was computed is not stated.
+  - mmFormer with MedMAP has an ET Dice of about 70 to 75 in every pattern, with or without T1c (T2 alone 69.02 on BraTS 2018, against 40.08 without MedMAP). Enhancing tumour is hard to see without T1c, so this looks implausible. Not confirmed.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. No arm without dropout, no paired test.
+
+### 3.34 Zou, Liu, Zheng, Geng, Li, Zuo, Wang, Zhang, Hong 2025 (MGML), Neural Networks. Doi `10.1016/j.neunet.2025.108525` (from candidates.csv)
+- **Status**: read (arXiv `2512.23936`). Method summary, all setup, Tables 1 to 5 read; Table 4 row labels could not be matched reliably in the text copy, so no Table 4 number is cited.
+- **Data and split**: BraTS 2020 with the RFNet split (219, 50, 100). BraTS 2023 split 7:1:2 "consistent with" IM-Fuse (3.32).
+- **Backbone**: RFNet or mmFormer, plus a meta learned soft label fusion and a full input to missing input consistency loss. 80³ crops, 900 epochs of 150 iterations, batch 1, Adam, lr 2e-4. How missing modalities are drawn in training is not described in what I read.
+- **Seeds**: one seed (1024). The paper says fixed seeds and deterministic training give "reproducible Dice scores without inter-run variation". That removes rerun noise, not seed variance, so it is not a substitute for several seeds.
+- **Arms**: BraTS 2020 baselines "directly cited" from IM-Fuse and DMAF-Net. BraTS 2023 baselines rerun in the same environment.
+- **Patterns and metrics**: all 15. Dice only. No test.
+- **Result (BraTS 2020, RFNet base)**: 86.31, 77.08, 60.38 with MGML against 83.90, 73.97, 57.07 (WT, TC, ET, Table 1). The abstract's 87.55, 79.36, 62.67 is the Table 3 model. Table 1 means check out.
+- **Problems found (my reading)**:
+  - The BraTS 2020 baselines are said to come from IM-Fuse ([23]) and DMAF-Net ([40]). IM-Fuse has no BraTS 2020 results. The U-HVED, RFNet, UNet-MFI and mmFormer WT rows equal TMFormer's Table 2 (3.41) row for row (for example U-HVED 69.85, 46.82, ... mean 62.76).
+  - The PASSION and DMAF-Net rows seem to follow another column order: their first cell is about 71 where the other rows have about 82 to 86. Not confirmed.
+  - The temperature τ is chosen in a sensitivity table; which split was used is not stated.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. One more paper with copied baselines, here with a wrong source.
+
+### 3.35 Xie, Wu, Ai, Min, Jiang, Geng, Wang 2026 (CCSD), Knowledge-Based Systems. Doi `10.1016/j.knosys.2026.116136` (from candidates.csv)
+- **Status**: read in full (arXiv `2511.14599` v2).
+- **Data and split**: BraTS 2018 (199, 29, 57) and BraTS 2020 (219, 50, 100), the M3AE split.
+- **Backbone**: ShaSpec's shared and specific 3D U-Net. A missing modality's input channel is set to zero. 100 epochs, batch 12, Adam, lr 1e-2, cosine.
+- **Missing inputs in training**: each forward pass computes all 15 subsets. The complete input output is the teacher, and a random level k (1 to 3 inputs) is distilled from it, plus a "decremental" path. So **every step also trains on complete input**, like Shen and Gao (3.28).
+- **Arms**: mmFormer, ShaSpec, M3AE and MIFPN on BraTS 2018, "reference [9]" (ShaSpec) and M3AE "taken from [2]". On BraTS 2020, SMU-Net and M3AE copied; the others not stated.
+- **Patterns and metrics**: all 15 on BraTS 2018. BraTS 2020 means only, with HD95. No test, no seeds.
+- **Result**: BraTS 2018 means 62.70, 78.23, 86.47 (ET, TC, WT); complete input 79.95, 85.70, 91.50. BraTS 2020 mean Dice 87.21, 82.54, 65.93 (WT, TC, ET).
+- **Internal error (my arithmetic)**: Table 1, MIFPN TC mean printed 74.63, its 15 rows give 74.92. A cell is typed "78,86". The other 14 column means check out.
+- **Closeness score (full text)**: 3 (A, B, F on BraTS 2020 only).
+- **Gap (section 5)**: does not narrow it: there is no model without this training. Like 3.28, it is a design that keeps complete input in every step, so it is one answer to a complete input cost. One sentence in the discussion (RQ2).
+
+### 3.36 Cheng, Qiu, Li, Zhang, Li, Yu 2026 (Hölder divergence), IEEE/CAA Journal of Automatica Sinica. Doi `10.1109/jas.2025.125609` (from candidates.csv)
+- **Status**: read (arXiv `2507.01254` v1). Method, training, data and Tables II and III read; the theorems and proofs skimmed.
+- **Data and split**: BraTS 2018 and 2020. The split is not stated; the baselines are said to adhere "to the same experimental configuration as RFNet".
+- **Backbone**: one 3D U-Net run in parallel on each modality, with mutual information and Hölder divergence losses. Batch 8, Adam, lr 8e-4, 600 epochs. How missing modalities are simulated in training is not clearly stated in what I read.
+- **Arms**: 17 published methods. 16 have numbers "sourced from their respective original research papers" (M2FTrans among them, ref [40]); only GGDM is rerun from code.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds.
+- **Result (means over 15)**: BraTS 2018 88.2, 82.6, 69.4 (WT, TC, ET); BraTS 2020 89.6, 84.5, 70.3. The best copied or rerun rival on BraTS 2018 ET is GGDM, printed 67.6.
+- **Internal error (my arithmetic)**: GGDM ET (BraTS 2018) mean printed 67.6; its rows give 67.33. The other 66 rows check out.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. Copied baselines across 16 methods.
+
+### 3.37 Zhang, Wang, Chen, Chen, Shen 2024 (IMS2Trans, "Scalable Swin"), Artificial Intelligence in Medicine. Doi `10.1016/j.artmed.2024.102788` (from candidates.csv)
+- **Status**: read (accepted manuscript from the Huddersfield repository). Method, setup, Tables 1 to 3 and the BraTS 2020 table read.
+- **Data and split**: BraTS 2018, 190 train and 95 test; BraTS 2020, 246 and 123. **No validation set.** Resized to 128³.
+- **Backbone**: one shared Swin encoder for all modalities, mmFormer style Bernoulli modality dropout on tokens (rate not given), a 3D mix augmentation. 1,000 epochs, batch 1, Adam, lr 2e-4.
+- **Arms**: mmFormer and others. The BraTS 2020 table uses RFNet's own numbers (86.98, 78.23, 61.47), which come from RFNet's 219, 50, 100 split, not from the 246, 123 split used here.
+- **Patterns and metrics**: all 15. Dice only.
+- **Statistics**: a per subject **paired Wilcoxon signed rank test** against mmFormer on the 95 BraTS 2018 test subjects, for each of the 15 patterns and 3 regions (45 tests). 12, 3 and 4 tests have p ≤ 0.05 (WT, TC, ET). No multiplicity correction; the direction of each difference is not shown. With Holm over the 45 tests, only p = 0.0004 (WT, FLAIR+T1c+T2) would pass (my arithmetic).
+- **Tuning on test**: the loss weight a_f is chosen from a table of test results (Table 1); its row 86.57, 75.67, 58.28 is the headline result.
+- **Closeness score (full text)**: 3 (A, B, E).
+- **Gap (section 5)**: does not narrow it. Add it to the paired test list: the first paper read with a per subject paired test against a baseline across all 15 patterns, and a clear example of why multiplicity correction matters.
+
+### 3.38 Robinet, Berjaoui, Cohen-Jonathan Moyal 2025 (BM-MAE), arXiv. Doi `10.48550/arxiv.2505.00568` (from candidates.csv)
+- **Status**: read (arXiv `2505.00568` v3). Segmentation section read closely; subtyping and survival sections skimmed.
+- **Data**: BraTS 2021, "1,251 training cases and 219 test cases". Which subjects the segmentation test used is not stated clearly.
+- **Backbone**: ViT with one tokenizer per modality, masked autoencoder pretraining on all four modalities, then a UNETR fine-tuned for 70 epochs.
+- **Arms**: training from scratch, SimCLR, MAE and BM-MAE. **One model is fine-tuned per modality subset (15 models per arm)**, so these are dedicated models, not one model facing missing input.
+- **Patterns and metrics**: all 15. Dice only. Wilcoxon signed rank test against BM-MAE per pattern and region (45 per arm), no multiplicity correction.
+- **Result**: means 65.7, 74.8, 88.0 (ET, TC, WT) for BM-MAE against 64.2, 72.4, 86.8 from scratch. A dedicated FLAIR only model from scratch reaches WT 90.3, complete input 93.4.
+- **Internal error (my count)**: the text says 42 of 45 scratch comparisons are significant; Table 1 stars 41 (ET 14, TC 15, WT 12).
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. It belongs with the dedicated models limit of RQ2 (3.21 ProtoKD, 3.18 ACN): a FLAIR only model at WT 90.3 is a strong reference we do not train.
+
+### 3.39 Kim, Haehn, Rampersad 2026 (Meta-D), arXiv. Doi `10.48550/arxiv.2603.04811` (from candidates.csv)
+- **Status**: read in full (arXiv `2603.04811` v1, short paper).
+- **Data and split**: 3D part on BraTS 2018 with mmFormer's split and preprocessing. 64³ crops (GPU memory), batch 1, 1,000 epochs.
+- **Method**: sequence metadata drives a cross attention block; the attention to a missing modality is masked to exactly zero. This is a presence indicator built into the architecture, compared with mmFormer's zeroed features.
+- **Arms**: mmFormer ("image only") against Meta-D. Different architectures (Meta-D has 24.1% fewer parameters), so the presence signal is not the only change.
+- **Patterns and metrics**: all 15. One "average tumor segmentation Dice" per pattern; which regions are averaged is not stated. No test, no seeds.
+- **Result**: means 84.04 against 82.85; largest gain T1 only, 74.07 against 68.95 (+5.12). Means check out.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. It is the closest read so far to a presence arm against a zero arm, but the architecture changes too, and there is one run at 64³.
+
+### 3.40 Liu, Yang, Wang, Nguyen, Jiang, Huang 2026 (SMSN), ICLR. No DOI in candidates.csv (`W7236551411`)
+- **Status**: read (ICLR 2026 proceedings PDF), main text and Tables 2 to 4; the appendix tables skimmed. Same group as MedMAP (3.33). Found by the M2FTrans title search this round.
+- **Data and split**: BraTS 2018 and 2020 with the M2FTrans splits. Transfer to a brain metastasis set without fine-tuning.
+- **Method**: sequential information bottleneck fusion; a random available modality starts the sequence, missing ones enter as zero tensors. Epochs, optimiser and drop rate are not in the paper text.
+- **Arms**: mmFormer, M2FTrans, MMMViT and IMS2Trans, "reproduced ... with the respective released codes" on the same split. Different networks.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds.
+- **Result**: means 85.62, 75.20, 62.39 (WT, TC, ET, BraTS 2018) against M2FTrans 85.39, 72.78, 54.95.
+- **Problems found**:
+  - The text says SMSN shows "superiority" "in each missing modality scenario". Table 2 does not support that: BraTS 2018 FLAIR only WT 84.38 against M2FTrans 88.16.
+  - BraTS 2018 WT: without FLAIR 89.39, with FLAIR (no T1) 86.93. Looks like two swapped cells. Not confirmed.
+  - Table 3 third block is labelled TC a second time (likely ET), and its MMMViT and IMS2Trans rows are identical.
+  - BraTS 2020 ET mean printed 63.06; its rows give 63.11 (my arithmetic).
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it.
+
+### 3.41 Zhang, Yang, Zhang, Yue, Liu, Ou, Gong, Sun 2024 (TMFormer), AAAI. Doi `10.1609/aaai.v38i7.28572` (from candidates.csv)
+- **Status**: read in full (AAAI open access PDF). Picked by citation chasing: CCSD (3.35) and MGML (3.34) use it as a baseline.
+- **Data and split**: BraTS 2018 (199, 29, 57, plus the U-HVED three folds) and BraTS 2020 (RFNet split, 219, 50, 100). 80³ crops, 500 epochs, batch 4, Adam.
+- **Method**: merges tokens of the available modalities only, so missing modalities are never fed as zero maps.
+- **Arms**: HeMIS, U-HVED, RFNet, UNet-MFI, mmFormer and M3AE, "trained under their recommended hyper-parameters within the same dataset split". The RFNet row (WT mean 86.76) differs from RFNet's own 86.98, which fits a real rerun.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds. 20 of the 21 Table 2 rows checked by script, all means within rounding.
+- **Result (BraTS 2020)**: means 87.27, 78.66, 63.43 (WT, TC, ET).
+- **On zero fill**: the case against zero maps is a t-SNE picture (zero maps give sparser fused features) and fewer FLOPs, not a controlled test. "Zero maps" here means zeroed inputs inside a dropout trained network, not our zero fill arm (trained on complete input only).
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it.
+
 ## 4. Record of this search
 
 - 16 logged searches: the 8 fixed queries, then 8 title searches for web finds and for known papers. 387 candidates.
@@ -522,6 +658,30 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - The ten were picked from the section 6 list and by title for closeness to the gap, not by a formal abstract score.
 - SMIL and PMR have open arXiv copies but are general multimodal methods, not brain tumour MRI, so section 1 puts them out. They were not read.
 - ModDrop (3.24) is counted in the 31 as background, the same way ModDrop++ (3.6, multiple sclerosis) was counted before. Without it, 30 papers are in scope.
+
+- Fourth round (2026-11-21, later the same day): 1 more logged search, so 36 logged searches and 700 candidates.
+- The three failed title searches were retried in a background loop, 90 s apart, at most two tries each, stopping on repeated 429. OpenAlex said: "Anonymous search is temporarily rate-limited while the search cluster is under elevated load", retry after 40 s.
+  - M2FTrans: first try 429, second try worked (19 hits, 2 new). It is `W4387831763`, doi `10.1109/jbhi.2023.3326151`, no open link. The same search surfaced SMSN (`W7236551411`, read as 3.40).
+  - "PMR prototypical modal rebalance": 429 twice. Not logged.
+  - The RFNet title: 429 twice, then the loop stopped. Not logged. RFNet is already read (3.25), so only its `candidates.csv` row is missing.
+- Not logged in `search-log.csv` because they are not searches (the tool logs OpenAlex searches only):
+  - Abstracts of 9 candidates fetched one by one from the OpenAlex work endpoint, to score them (section 1); two had no abstract (`W7214395715`, `W7166641782`). These answered while search was throttled.
+  - Two `filter=cites:` requests (forward citations, section 6): Öchsner (`W7171498209`) has 1 citing work, a blood flow paper, out of scope. Cai's only row is the Zenodo code record (`W7213346182`), 0 citing works.
+  - Europe PMC full text for `W4381326261` (PMC10501967): HTTP 500 twice.
+  - arXiv by title: GlioMODA, no match.
+- 14 papers requested through the tool: 11 downloaded; `W4381326261` `not_pdf` (PMC), GlioMODA `W7128715154` `failed` (OUP), MAVP `W4387968082` `failed` (ACM).
+- Scored from abstracts first (section 1), then read: IM-Fuse (downloaded last round), MedMAP, MGML, CCSD, Hölder, IMS2Trans, BM-MAE, Meta-D, SMSN, TMFormer. 10 read: 3.32 to 3.41.
+- Screened and **out** by section 1, not counted:
+  - Integrated glioma framework (`W4415466521`): diagnosis task; segmentation is a preprocessing step with no missing input result. Downloaded and checked.
+  - "When do anatomical priors help?" (`W7212032457`): brain region segmentation, not tumour; its main subject is atlas priors, not a strategy. Abstract only.
+  - "Deep Learning for Tumour Segmentation with Missing Data" (`W4298395437`): a 2022 Neuro-Oncology conference abstract of the Ruffle et al. study (3.7). Not a new paper.
+  - Mind the Gap (`W4406262216`): conference version of MedMAP (3.33), read in part, not counted.
+- Web searches in this round: 0.
+
+**Departures in the fourth round, stated plainly:**
+- Section 1 scoring was done from abstracts for the 8 listed papers and 9 more candidates, not across all 700. The 9 more were picked by title.
+- TMFormer (3.41) was picked by citation chasing (a baseline in 3.34 and 3.35), after MAVP, the higher scored pick, failed to download.
+- Some notes say which parts were read closely and which skimmed (3.33, 3.34, 3.36, 3.38, 3.40). All ten were opened and their method, setup and main tables read.
 
 **Departures from section 1, stated plainly (rounds one and two):**
 - Not all 387 were screened. Titles of the first 322 were filtered by keyword, which left 113, and I read those titles. A paper with an unusual title could be missed.
@@ -553,18 +713,26 @@ What this means:
 
 Checked 2026-11-21 against papers 22 to 31: none of them narrows this gap (see "Update after 31 papers" in section 2). The one with and without dropout comparison at complete input (ModDrop, 3.24) is out of domain, one run, and at about ten times our complete input exposure.
 
+Checked 2026-11-21 against papers 32 to 41: none narrows the complete input cost gap. No paper trains the same backbone with and without all subset dropout and compares them at complete input. One framing point changes:
+5. **Not "first on BraTS 2023".** IM-Fuse (3.32) already retrained seven methods on BraTS 2023 GLI at 128³ with a validation split. Our wording must claim a controlled comparison of training strategies on one backbone, with seeds, paired tests and a sealed test set. It must not claim to be the first study on this dataset. This is a wording point for `/architect` and the chapters, not a protocol change.
+
 ## 6. Next
 
-31 of at least 50 papers read, 30 in scope plus ModDrop as background (papers 22 to 31 read 2026-11-21). Read next:
-- Downloaded, not read: IM-Fuse (`W4414351039`), fetched 2026-11-21 from the MICCAI 2025 open access site (`papers.miccai.org/miccai-2025/paper/0747_paper.pdf`), title checked in the PDF, saved as `~/literature-pdfs/W4414351039.pdf` with a text copy. Its candidates.csv row still says `not_pdf`.
-- **For the human (no open copy found)**:
-  - Qiu et al. 2025, "Does Adding a Modality Really Make Positive Impacts in Incomplete Multi-Modal Brain Tumor Segmentation?", TMI, `W4406137843`, doi `10.1109/tmi.2025.3526818`. Not on arXiv by title; a web search (2026-11-21) found only abstract pages, no open copy. The closest title to our question so far.
-  - PMKL, "Learning With Privileged Multimodal Knowledge for Unimodal Segmentation", TMI, `W3206034503`, doi `10.1109/tmi.2021.3119385`. A web search (2026-11-21) found only the code repository and abstract pages, no open copy.
-  - M2FTrans: not in `candidates.csv` (the title search failed with 429) and no arXiv match. AdaMM's reference list gives it as Shi, Yu, Cheng, Yang, Cheng, Yan, "M2FTrans: Modality-masked fusion transformer for incomplete multi-modality brain tumor segmentation", IEEE Journal of Biomedical and Health Informatics 28 (2023) 379 to 390 (not checked; no DOI taken from it). Retry the title search first; ask only if it still has no open copy.
-  - Feng (ModDrop in MS): not found by a guessed title. The human should give the full title or authors.
-- Out of scope, open on arXiv, read only if a strategy paper relies on them: SMIL (`2103.05677`), PMR (`2211.07089`).
-- Open and in scope, not read yet (picked by title, score them from the abstract first): MedMAP / "Mind the Gap" (`W4413360068`, `W4406262216`), Multimodal MAE pretraining for missing modalities (`W4410081345`), MGML (`W7117236435`), CCSD (`W7160394731`), Hölder divergence (`W4416895193`), "Brain Tumor Segmentation for Multi-Modal MRI with Missing Information" (`W4381326261`), Scalable Swin (`W4391469551`), integrated glioma framework (`W4415466521`).
-- Reviews: Zhou 2023 survey (`W4313340471`, closed), and the two failed downloads (`W4410086815`, `W4407980026`).
-- Forward citations from Cai et al. and Öchsner et al. The tool has no citation search yet, so this needs a small addition or a web route.
-- A real benchmark paper is still needed. Neither 3.15 nor 3.31 is one.
-- OpenAlex limited this round with 429 errors. A free key (ADR 0003) would let the failed title searches run.
+41 of at least 50 papers read: 40 in scope plus ModDrop as background. Papers 32 to 41 read 2026-11-21. Read next:
+- **For the human (no open copy found)**, in order of closeness:
+  - GlioMODA, "GlioMODA: Robust glioma segmentation in clinical routine", Neuro-Oncology Advances 2026, `W7128715154`, doi `10.1093/noajnl/vdag034` (from candidates.csv). By its abstract: BraTS 2021, 11 protocol combinations, Wilcoxon signed rank tests with Benjamini–Yekutieli correction. The tool download failed (OUP); no arXiv match. **The most promising unread paper for the benchmark question.**
+  - Qiu et al. 2025, "Does Adding a Modality Really Make Positive Impacts in Incomplete Multi-Modal Brain Tumor Segmentation?", TMI, `W4406137843`, doi `10.1109/tmi.2025.3526818`. Still not in `~/literature-pdfs`. IM-Fuse's reference [25] is a different Qiu paper (MAVP, 2023), so no new route.
+  - MAVP, Qiu et al. 2023, "Modal-aware Visual Prompting for Incomplete Multi-modal Brain Tumor Segmentation", ACM MM, `W4387968082`, doi `10.1145/3581783.3611712`. A modality state classifier feeds prompts, which is near our presence arm. ACM download failed.
+  - M2FTrans, `W4387831763`, doi `10.1109/jbhi.2023.3326151` (from candidates.csv), no open copy. The Hölder paper (3.36) cites it as JBHI 28(1), 379 to 390, 2024; OpenAlex gives 2023 (online date, not checked).
+  - PMKL, TMI, `W3206034503`, doi `10.1109/tmi.2021.3119385`. Still not in `~/literature-pdfs`.
+  - "Brain Tumor Segmentation for Multi-Modal MRI with Missing Information", `W4381326261`, doi `10.1007/s10278-023-00860-7`. Open on PMC (PMC10501967), but the tool got `not_pdf` and Europe PMC answered HTTP 500 twice. A browser download by the human should work.
+  - Feng (ModDrop in MS): the human should give the full title or authors.
+- Open, in scope, not read yet (picked by title; score from the abstract first): Multi-View Global Perception (`W7128725314`), Decoupling ego and other modalities (`W4406259532`, arXiv), Semantic-guided Masked Mutual Learning (`W4409366865`, AAAI), Hierarchical in-out fusion (`W4411856088`, Scientific Reports), and the 2026 titles on calibration and uncertainty under missing modalities (`W7214395715`, `W7166641782`, `W7167590398`; no abstracts in OpenAlex).
+- Reviews: Zhou 2023 survey (`W4313340471`, closed), a 2026 review (`W7138904805`), and the two failed downloads (`W4410086815`, `W4407980026`).
+- Out of scope, open on arXiv, read only if a strategy paper relies on them: SMIL (`2103.05677`), PMR (`2211.07089`). The PMR title search is still not logged (429).
+- **Forward citations of Cai et al. and Öchsner et al. (proposal, not built):**
+  - Smallest route: a `cites` subcommand in `fetch_papers.py` that calls OpenAlex `filter=cites:<id>`, adds new rows to `candidates.csv` and logs one line to `search-log.csv` like a search. Standard library only, toy tests like the existing ones. This is a tool addition, so it needs an amendment to ADR 0003 first.
+  - Evidence so far (by hand, 2026-11-21): two `cites:` requests answered HTTP 200 while search returned 429. Two requests do not show that the filter is never throttled.
+  - Öchsner (`W7171498209`): 1 citing work, out of scope. Cai: `candidates.csv` has only the Zenodo code record (`W7213346182`, 0 citers). The paper itself needs its own OpenAlex id (or its arXiv id) before its citations can be chased. The human could confirm where Cai et al. is published.
+  - A free OpenAlex key (ADR 0003, set by the human in an environment variable) would end the 429 errors for both search and citations.
+- **A real benchmark is still needed.** IM-Fuse (3.32) is the best method benchmark so far (BraTS 2023, retrained, validation split), but not a strategy benchmark: recipes differ by arm, Dice only, one run, no test. AdaMM (3.31) and 3.15 are not ones either. GlioMODA is the next candidate.
