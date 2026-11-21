@@ -24,3 +24,13 @@ utc,query,from_year,hits,returned,new
 2026-11-07T13:16:17Z,IM-Fuse incomplete multimodal brain tumor segmentation,2016,350,50,28
 2026-11-07T13:16:18Z,ModDrop adaptive multi-modal gesture recognition,2016,294,50,46
 2026-11-07T13:16:20Z,Clinical Missingness-Aware mmFormer,2016,127,50,11
+2026-11-21T13:19:11Z,Knowledge distillation from multi-modal to mono-modal segmentation networks,2016,789,10,3
+2026-11-21T13:19:14Z,SMIL multimodal learning with severely missing modality,2016,401,10,8
+2026-11-21T13:19:17Z,Self-supervised feature learning multiple sclerosis lesion segmentation modality dropout,2016,723,10,10
+2026-11-21T13:19:18Z,Missing modality benchmark brain tumor segmentation,2016,6148,10,0
+2026-11-21T13:19:43Z,Learning with privileged multimodal knowledge for unimodal segmentation,2016,320,10,7
+2026-11-21T13:19:53Z,Modality balancing incomplete multimodal brain tumor segmentation,2016,3055,10,4
+2026-11-21T13:21:04Z,Robust multimodal brain tumor segmentation via feature disentanglement and gated fusion,2016,647,10,3
+2026-11-21T13:22:06Z,Modality balancing incomplete multimodal brain tumor segmentation,2016,3055,10,0
+2026-11-21T13:23:07Z,ModDrop adaptive multi-modal gesture recognition,2014,332,10,2
+2026-11-21T13:27:44Z,IM-Fuse,2016,74250,10,10
