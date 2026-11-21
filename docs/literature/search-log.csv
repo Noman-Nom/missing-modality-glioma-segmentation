@@ -35,3 +35,5 @@ utc,query,from_year,hits,returned,new
 2026-11-21T13:23:07Z,ModDrop adaptive multi-modal gesture recognition,2014,332,10,2
 2026-11-21T13:27:44Z,IM-Fuse,2016,74250,10,10
 2026-11-21T14:24:16Z,M2FTrans modality-masked fusion transformer incomplete multi-modality brain tumor segmentation,2016,19,10,2
+2026-11-21T14:46:49Z,PMR prototypical modal rebalance multimodal learning,2016,180,50,46
+2026-11-21T14:47:31Z,RFNet region-aware fusion network for incomplete multi-modal brain tumor segmentation,2016,125,50,1

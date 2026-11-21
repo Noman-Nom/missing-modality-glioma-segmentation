@@ -179,6 +179,36 @@ The ten new papers (3.32 to 3.41) are all in scope, so 40 in scope plus ModDrop 
 6. **Number problems: now 13 of 41.** New: 3.32 (ShaSpec means), 3.33 (Table I cells, Total Avg.), 3.35, 3.36, 3.38, 3.40 (claim against table, duplicated rows). 3.34 has an unclear baseline source, not counted as a number error. The tables of 3.39 and 3.41 check out. The pattern tables of 3.37 were not checked by script; it tunes a loss weight on its test set. Copied baselines in 3.34 (source unclear), 3.35, 3.36 and 3.37.
 7. **Seeds**: none of the ten new papers reports runs over several seeds. MGML (3.34) says one fixed seed removes "inter-run variation", which mixes up rerun noise and seed variance. Worth one sentence in our methods chapter.
 
+### Update after 52 papers (2026-11-21, the gate of 50 reached, provisional)
+
+The eleven new papers (3.42 to 3.52) are 52 read in total: 51 in scope plus ModDrop as background. One of them, NeuroWeave-3D (3.43), is mostly a study plan, so its scope is doubtful; without it, 50 are in scope (section 6). None changes the first answer, and none narrows the gap in section 5.
+
+1. **Still no test of the complete input cost.** No new paper trains the same backbone with and without dropout and compares them at complete input. NeuroMesh (3.42) trains every arm with per channel dropout (p = 0.15, about 52% complete input, my arithmetic). NeuroWeave-3D (3.43) **plans** exactly that comparison ("a capacity-matched complete-input model trained without modality masking") with paired tests, Benjamini–Hochberg and three seeds, but reports no run. It is a watch item.
+2. **Dropout is not one thing, again.** New exposures: NeuroMesh about 52% complete input; NeuroWeave-3D a curriculum from 70% complete batches to all 15 subsets. Most method papers still do not give the rate (3.44, 3.46, 3.47, 3.48, 3.50).
+3. **Presence indicators: one more small data point.** The dual-stage paper (3.50) swaps its text prompt for a binary presence indicator: +0.38 mean Dice over no indicator (one run, 1% complete training data, inside a larger method). With Meta-D (3.39) and Cai (3.1), the evidence on presence stays thin and confounded.
+4. **A second method benchmark on BraTS 2023.** UniME (3.46) retrains nine methods, IM-Fuse among them, on BraTS 2023 and 2024 with a 70/10/20 split and validation selection. Like IM-Fuse it is a method benchmark with each method's own recipe, Dice only, one run, no test. So "first on BraTS 2023" is doubly taken, and a strategy benchmark is still not found.
+5. **Collapse without FLAIR, again.** NeuroMesh's gated models lose most of their WT Dice without FLAIR (0.596 to 0.108), while the plain U-Net does not (0.604 to 0.545), on 4 test patients.
+6. **Number problems: now 21 of 52.** New: 3.42 (counts in the text swapped against Table I), 3.44 (one cell, one mean, one column), 3.45 (one mean, small), 3.47 (copied baseline means), 3.48 (one cell), 3.49 (copied baseline means, own mean, text against table), 3.50 (labels in text against table; minor), 3.52 (rows repeated across tables and datasets, five means, text against table). Not counted as errors but not usable: 3.43 (numbers of unstated source) and 3.51 (flat Dice in all 15 patterns, implausible). UniME's 60 rows check out. Copied baselines again in 3.45, 3.47, 3.48, 3.49 and 3.51; source not stated in 3.52.
+7. **Statistics**: two papers claim significance without naming the test (3.50, 3.51). None reports seeds. The paired style list is unchanged: Cai, Öchsner, Chrysochoou, M3AE, U-HVED, ProtoKD, IMS2Trans and BM-MAE, with multiplicity correction only in Chrysochoou.
+
+### Final provisional answer at the gate (2026-11-21, 52 papers read)
+
+**Has anyone already done a fair, subject level, paired comparison of zero fill, modality dropout and presence indicators on BraTS?**
+
+**Unchanged from the first answer: "done already" by the rule in section 1, but only by Cai et al. 2026 (3.1), at reduced resolution and budget, in a manuscript whose peer review is not confirmed.** No other paper of the 52 meets all of A to E. Öchsner (3.2) and Chrysochoou (3.3) come closest: zero fill against dropout, paired tests, full resolution nnU-Net, but only 1 and 3 missing patterns, and no presence arm.
+
+What the 52 papers show:
+- **Known**: zero fill on a complete input model fails when a key sequence is missing, and dropout repairs most of it (3.1 to 3.5; the same collapse without FLAIR in 3.30). A benefit of E3 over E1 would be a replication.
+- **Not settled, and our strongest gap**: whether uniform all subset dropout costs complete input accuracy at full resolution and full budget, tested on the same subjects with a paired test and several seeds. Cai found a large cost at low budget and one seed for the exposure arm; Öchsner and Chrysochoou found almost none with one or two dropped sequences. No paper read tests it the way E1, E3, E4 and E3b do. NeuroWeave-3D (3.43) plans it but has not run it.
+- **Thin**: presence indicators (3.1, 3.6, 3.39, 3.50), all one run or confounded with architecture.
+- **Not open to us**: "first comparison of these strategies" (Cai) and "first study on BraTS 2023" (IM-Fuse 3.32, UniME 3.46).
+
+Limits of this answer:
+- 52 of 747 candidates were read, picked by title and abstract, not by a full screen. "Not found in this search" is not "does not exist".
+- GlioMODA (by its abstract: BraTS 2021, 11 protocol combinations, Wilcoxon with Benjamini–Yekutieli) is the most promising unread paper for the benchmark question and has no open copy.
+- Forward citations of Cai et al. have not been searched: the paper itself has no OpenAlex id in `candidates.csv`, only its Zenodo code record.
+- Where Cai et al. is published is still not confirmed.
+
 ## 3. Paper notes
 
 Bibliographic details below are copied from the papers. None is in `writing/refs.bib` yet, so none may be cited in a chapter until it is added and verified.
@@ -640,6 +670,140 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - **Closeness score (full text)**: 2 (A, B).
 - **Gap (section 5)**: does not narrow it.
 
+### 3.42 Krishnan, Janakiraman 2026 (NeuroMesh), bioRxiv preprint. Doi `10.64898/2026.08.23.746542` (from candidates.csv, `W7204454037`)
+- **Status**: read (bioRxiv PDF, posted 27 August 2026, formatted as an IEEE TMI submission, not peer reviewed): method, data, setup, results, mechanism analysis and limitations closely; the graph convolution maths skimmed. Table I checked on a rendered image of page 7.
+- **Data and split**: a random 30 patient subset of BraTS 2020 (seed 42), from a pre-sliced Kaggle HDF5 mirror, not the official NIfTI release. Patient level split 22, 4, 4, test frozen under a written protocol before any test evaluation. Channel order found by the authors' own image checks, which they flag as not certain. 2D slices at 96×96, upsampled back to 240×240 for scoring.
+- **Backbone**: 2D U-Net, base width 16. AdamW, 4 epochs (1,708 steps), batch 8, on 1 CPU core. One seed, stated as a limitation.
+- **Missing inputs in training**: each channel zeroed independently with p = 0.15, **in all four trained models**. So complete input is seen in about 52% of draws (0.85⁴, my arithmetic), and no arm is trained on complete input only.
+- **Arms**: NeuroMesh (a GRU plus graph controller at the bottleneck), plain U-Net, U-Net with Monte Carlo dropout at the bottleneck, and a static gated U-Net. Same backbone, split and seed; the arms differ in architecture, not in the missing modality strategy. Only NeuroMesh and the plain U-Net were scored on test.
+- **Patterns and metrics**: complete input and the 4 single missing patterns. Dice and HD95 for WT, TC, ET. No inferential test (n = 4 per split, stated).
+- **Result**: without FLAIR, NeuroMesh WT Dice falls from 0.596 to 0.108; the plain U-Net from 0.604 to 0.545. The static gate control reproduces the same collapse on validation. Their mask analysis shows the controller does not change with the missing modality. The authors call this negative mechanism result the main contribution.
+- **Internal error (my count, confirmed on the page image)**: the text says NeuroMesh beats the plain U-Net on TC in "three of five conditions" and on ET in "four of five". Table I gives TC higher in 4 of 5 (the fifth is 0.003 against ≈0) and ET higher in 3 of 5. The two counts look swapped.
+- **Closeness score (full text)**: 3 (A, D, F).
+- **Gap (section 5)**: does not narrow it. Every arm uses dropout at about 52% complete input exposure, so there is no with and without comparison. It adds one more dropout exposure to the "dropout is not one thing" point, and a WT collapse without FLAIR that a gate can cause.
+
+### 3.43 Miller, Weber 2026 (NeuroWeave-3D), bioRxiv preprint. Doi `10.64898/2026.10.29.762804` (from candidates.csv, `W7225244445`)
+- **Status**: read in full (bioRxiv PDF, posted 4 November 2026, 12 pages, not peer reviewed).
+- **What it is**: mostly a **study plan**. The figure caption says "Planned architecture", section 5 is "Expected Results and Ablations", the statistics and seeds are in the future tense ("We will report", "Results will be repeated with at least three training seeds"), and section 4.2 says "the final paper must rerun all selected baselines under one split and preprocessing pipeline". No training run, hardware, epoch count or seed is reported.
+- **Numbers it prints anyway**: Table 1 (BraTS 2021, complete input) gives NeuroWeave-3D 92.7, 90.9, 86.1 (WT, TC, ET). Its six baseline rows equal the "contextual anchors" that section 4.2 copies from "a recent BraTS 2021 comparison" under that paper's protocol. Table 2 gives a missing modality ablation (Macro 80.8 to 85.1, Worst 68.9 to 75.2, failure detection AUC 0.70 to 0.85). How these numbers were produced is **not stated**. I treat them as not evidence.
+- **Planned design (not results)**: one encoder and decoder shared by zero fill or mask token input, modality dropout, mean feature imputation, learned completion and synthesis baselines; a "capacity-matched complete-input model trained without modality masking" to measure complete input preservation; macro over 15 subsets and worst case (the same summaries as Cai et al., 3.1); HD95; paired case level bootstrap CIs, a paired permutation test, Benjamini–Hochberg across subsets; at least three seeds.
+- **Training curriculum**: 70% complete input batches for the first 20% of training, then a linear rise to all 15 subsets, with one and two sequence subsets oversampled in the last third.
+- **Closeness score (full text)**: 2 (A, B) for what is reported. The plan, if run, would meet A to F, but for a new method against baselines, not as a strategy comparison.
+- **Gap (section 5)**: does not narrow it, because no comparison was run. **A watch item**: if a later version reports the planned complete input model against dropout with paired tests, it would answer part of our complete input cost question. Check for a new version before the thesis is submitted.
+- **In scope?** By section 1 it "evaluates" BraTS with missing inputs only if Table 2 is a real result, which the paper does not show. It is counted here as in scope and read, but this is a judgement call for the human; see section 6.
+
+### 3.44 Lee, Kim, Hong, Han, Yi 2026 (MMA-LTS), LNCS. Doi `10.1007/978-3-032-38079-1_39` (from candidates.csv, `W7214395715`)
+- **Status**: read (arXiv `2610.11419` v1): method, setup, Tables 1 to 3 closely; the ablation and timing figures skimmed. Tables 1 and 2 checked on rendered images of pages 6 and 7.
+- **Data and split**: BraTS 2020 with the RFNet split (219, 50, 100) and FeTS 2024 (1,000, 125, 126).
+- **What it is**: a post-hoc calibration module (voxel wise temperature conditioned on which modalities are present and on a feature difficulty score), trained on the validation set on top of frozen segmenters (RobustSeg, mmFormer, DC-Seg). The segmenters are trained with ModDrop; the rate is not stated.
+- **Arms**: calibration methods (temperature scaling, Dirichlet, local temperature scaling, selective scaling, MC dropout, two trained-in losses) on the same backbones. Not missing modality strategies.
+- **Patterns and metrics**: all 15. Dice and expected calibration error (ECE) per region. No distance measure, no test, no seeds; the conclusion names "formal statistical testing" as future work.
+- **Result (DC-Seg, BraTS 2020, mean ECE)**: 10.2, 14.5, 15.1 (WT, TC, ET) against 13.1, 16.8, 16.5 for local temperature scaling and 20.1, 27.1, 24.8 uncalibrated.
+- **Presence signal**: the module gets a learned token per modality state (present or missing). Replacing it with a count of present modalities raised ECE in their ablation (figure only, one run). This is calibration, not segmentation, so it is not evidence for our presence arm.
+- **Problems found (my arithmetic, confirmed on the page images)**:
+  - Table 1, TC, MC dropout Dice: one cell is 54.8 where its neighbours are 64.6 to 64.8; the row gives a mean of 79.60, printed 80.3.
+  - Table 1, ET, SDC Dice: average printed 83.5; its 15 cells give 66.90.
+  - Table 2, uncalibrated, complete input column: WT 88.9, TC 85.4, ET 75.6, while MC dropout in the same column gives 92.7, 92.4, 88.5, and the caption says temperature methods keep the uncalibrated Dice. The TC and ET means are printed 84.3 and 74.5; the cells give 84.95 and 74.75.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. Calibration is outside our RQs; no arm without dropout.
+
+### 3.45 Baek, Park, Sim, Lee, Lee, Kim 2026 (set-inclusive uncertainty), LNCS. Doi `10.1007/978-3-032-38085-2_49` (from candidates.csv, `W7166641782`)
+- **Status**: read (arXiv `2606.30374` v1): method, setup, Tables 1 to 3 closely; the gradient analysis skimmed. Table 1 checked on a rendered image of page 6.
+- **Data and split**: BraTS 2018 (M3AE split, 199, 29, 57) and BraTS 2020 (RFNet split, 219, 50, 100). 112³ patches, 800 epochs, batch 2, Adam.
+- **Method**: RFNet's backbone with a Gaussian embedding before the head; for each case three nested modality sets (subset, superset, full) are trained together, with losses that pull the subset means to the full input mean and order their variances.
+- **Arms**: RFNet, mmFormer, M3AE, DC-Seg. Numbers are **copied from the original papers when available**; only the BraTS 2018 mmFormer and DC-Seg rows were rerun. So not same subjects scored under each arm for most rows.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds.
+- **Result (BraTS 2020 means)**: 88.07, 80.22, 66.02 (WT, TC, ET) against DC-Seg 87.54, 79.63, 65.00.
+- **Internal error (my arithmetic, confirmed on the page image)**: the ET mean for their own method is printed 66.02; its 15 cells give 66.08. Small, but the cells have two decimals, so it is not rounding. The other 14 column means check out to rounding.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it.
+
+### 3.46 Song, Xue, Zhang, Wang, Liu, Fu, Bao, Yeo 2026 (UniME), arXiv. Doi `10.48550/arxiv.2604.22177` (from candidates.csv, `W7156149598`)
+- **Status**: read (arXiv PDF): method, setup, comparison and Tables 1 to 4 closely; the ablation tables 5 to 7 skimmed. The supplement (HD95, preprocessing) was not opened.
+- **Data and split**: **BraTS 2023 GLI (1,251) and BraTS 2024 (1,350)**, each split 70/10/20, model selected on validation and scored on test.
+- **Backbone**: stage 1 pretrains a ViT encoder by masked image modelling; stage 2 adds four CNN encoders, a fusion block and a U-Net decoder. Modalities are randomly masked in stage 2 (rate not stated). 96³ crops, 600 epochs of 250 iterations, batch 4, AdamW.
+- **Arms**: HeMIS, U-HVED, RFNet, mmFormer, M3AE, M2FTrans, LS3M, IM-Fuse and M2SegMamba, "trained under their recommended hyperparameters within the same dataset split". So same subjects, different recipes, like IM-Fuse (3.32).
+- **Patterns and metrics**: all 15. Dice in the main text, HD95 in the supplement. No test, no seeds.
+- **Result (BraTS 2023 means)**: their mean beats the second best by 1.40, 1.53, 2.36 (WT, TC, ET). 60 table rows checked by script; all means within rounding.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow the complete input cost gap. **Framing**: a second retrained method benchmark on BraTS 2023, after IM-Fuse, which it includes as a baseline. This strengthens point 5 of section 5: we must not claim to be first on BraTS 2023.
+
+### 3.47 Yang, Shan, Li, Wang, Yang, Wang, Heng, Li, Wang 2024 (DeMoSeg), IEEE BIBM. Doi `10.1109/bibm62325.2024.10822635` (from candidates.csv, `W4406259532`)
+- **Status**: read (arXiv `2408.08708`): method, setup, Tables I to III closely; ablation tables V and VI skimmed. Tables I and II checked on a rendered image of page 6.
+- **Data and split**: BraTS 2020 (219, 50, 100), BraTS 2018 (199, 29, 57), BraTS 2015 (242, 12, 20). 128³ patches, 1,000 epochs, SGD.
+- **Method**: each modality is mapped to its own feature plus three stand-in features for the others; missing modalities are filled from the stand-ins in an order based on clinical priors. Training zeroes random modalities (the "modality perturbation" of earlier work); rate not stated.
+- **Arms**: RFNet, mmFormer, MAVP, GSS, **all quoted from other papers** ("We quote the reported results ... for fair comparison").
+- **Patterns and metrics**: all 15. Dice only. ET under 500 voxels relabelled as non-enhancing (post-processing). No test, no seeds.
+- **Result (BraTS 2020 means)**: 88.90, 81.58, 69.71 (WT, TC, ET) against GSS 88.09, 79.24, 66.42.
+- **Problems found (my arithmetic, confirmed on the page image)**: DeMoSeg's own column means check out in all three tables. Some copied baseline means do not match their rows: Table I, ET, GSS printed 66.42, its cells give 66.18 (the claimed relative gain of 4.95% uses 66.42); Table I, ET, mmFormer printed 64.08, cells 63.99; Table II, TC, MAVP printed 76.00, cells 76.09. These were likely copied as printed in the source papers.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it.
+
+### 3.48 Liang, Zhou, Wang, Chen, Gu, Yao, Wu, Huang, Chen 2025 (SMML), AAAI. Doi `10.1609/aaai.v39i5.32545` (from candidates.csv, `W4409366865`)
+- **Status**: read (AAAI open access PDF): method, setup, Tables 1 to 4 closely; the relational loss maths skimmed. Table 1 checked on a rendered image of page 6.
+- **Data and split**: BraTS 2015 (242, 12, 20), BraTS 2018 (199, 29, 57), BraTS 2020 (219, 50, 100). 128³ crops, 1,000 epochs, batch 2, Adam.
+- **Method**: two student branches, each with its own random modality dropout mask (missing features set to zero), trained to agree, with SAM-Med3D outputs as extra input to a refinement net used only in training.
+- **Arms**: MCTSeg, M3AE, U-Net-MFI, RFNet, mmFormer, SMU-Net. Numbers from the papers where they exist; the rest "replicated ... using the official implementations".
+- **Patterns and metrics**: all 15 on BraTS 2018; only means for 2015 and 2020. Dice only. No test, no seeds.
+- **Result (BraTS 2018 means)**: 87.2, 78.5, 64.2 (WT, TC, ET) against SMU-Net 85.9, 77.9, 61.8.
+- **Internal error (my arithmetic, confirmed on the page image)**: Table 1, TC, U-Net-MFI, T1c with T1: 91.9 (printed in bold as best), where every other method gives 79 to 84. The row mean is printed 77.0; the cells give 77.71. With 81.9 in that cell the mean would be 77.04, so it looks like a typo.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it.
+
+### 3.49 Liu, Zhang, Lu, Wang, Wang 2025 (hierarchical in-out fusion), Scientific Reports 15, 23017. Doi `10.1038/s41598-025-07466-9` (from candidates.csv, `W4411856088`)
+- **Status**: read (Nature open access PDF): setup, results and Tables 1 and 2 closely; the fusion block descriptions skimmed. Text and Table 1 checked on a rendered image of page 8, Table 2 on page 9.
+- **Data and split**: BraTS 2020 and BraTS 2018, "randomly divided into 70% for training, 10% for validation, and 20% for testing", but Table 1 follows "the data partitioning strategy outlined in [24]" (SFusion) and "we reference the results from that study". 128³ patches, 250 epochs (the text also says "epoch 1000" for one result), batch 1.
+- **Arms**: U-HeMIS, SFusion, mmFormer, CNN-Transformer, quoted from SFusion's paper. How missing modalities are simulated in training is not stated.
+- **Patterns and metrics**: all 15. Dice only. No test, no seeds.
+- **Result (BraTS 2020 means)**: 83.14, 73.54, 62.43 (WT, TC, ET); Table 1 means check out.
+- **Problems found (my arithmetic, confirmed on the page image)**:
+  - Table 2 (BraTS 2018), CNN-Transformer: means printed 84.91, 74.37, 57.44 (WT, TC, ET); its 15 cells give 85.61, 76.26, 54.59. The improvements claimed in the text (6.39%, 1.36%, 0.06%) are computed from the printed means.
+  - Table 2, own method, WT mean printed 84.97; cells give 85.11. The text gives the own TC mean as 74.37, which is the CNN-Transformer value; the table says 74.42.
+  - Table 1, own method, ET with T1, T2 and FLAIR (no T1c): 77.24, the same as the cell above it, while every other ET value without T1c is 26 to 48. The printed mean includes it. Implausible, not confirmed as an error.
+  - The text lists SFusion's means as "57.33, 71.81 and 82.29 for the WT, TC, ET"; the order is reversed.
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it.
+
+### 3.50 Zhao, Chen, Pang, Fu, Li, Tang, Ang, Jin 2026 (dual-stage missing modalities), AAAI. Doi `10.1609/aaai.v40i16.38334` (from candidates.csv, `W7137814727`)
+- **Status**: read (AAAI PDF): method, setup, Table 1, the ablations (Tables 2 and 3, Figure 5) closely; the distribution approximation maths skimmed. The appendix (HD95) was not opened. Tables 2 and 3 checked on a rendered image of page 7.
+- **Setting**: modalities are missing in **training** too. Only 1%, 10% or 50% of training cases are complete ("FM ratio"); the rest miss some modalities. This differs from ours (complete training data).
+- **Data and split**: BraTS 2018 and BraTS 2020, splits of earlier work (M3AE, RFNet).
+- **Method**: mask reconstruction pretraining, then a teacher that completes missing modalities and distils into a student, plus a hypernetwork that adapts decoder layers to a text prompt naming the present modalities. Modality dropout throughout.
+- **Arms**: RFNet, M3AE, IM-Fuse (inference stage methods, given zero padding for missing training modalities), Meta-learning (reimplemented) and M3FeCon, "implemented using the same dataset split and backbone".
+- **Patterns and metrics**: all 15. Dice in the main text, HD95 in the appendix. Table 1 stars "statistically significant improvements of average DSC with p < 0.05", but the test is not named and it is not said to be paired. No seeds.
+- **Result (BraTS 2018, 1% complete)**: 60.16, 77.97, 85.59 (ET, TC, WT) against M3AE 55.32, 76.11, 84.85. All 18 Table 1 means check out.
+- **Presence signal (Figure 5, one run)**: replacing the text prompt with a binary presence indicator through a small MLP raised the mean over regions from 73.44 to 73.82 (+0.38); the text prompt gave 74.32. Same backbone, same training, 1% complete data. This is a presence indicator against no indicator, but inside their method and with incomplete training data.
+- **Problems found (confirmed on the page image)**: the text says CTD gave +2.31% and PGMA, added last, +2.56%; Table 2 lists PGMA second (74.32) and CTD last (74.57). Table 3's caption says "prompt-guided modality adaptation" but its rows are the CTD analysis. Labelling, not arithmetic.
+- **Closeness score (full text)**: 3 (A, B, D as claimed).
+- **Gap (section 5)**: does not narrow it: no arm without dropout, and the training data are incomplete. The presence result is a small, one run data point for RQ2's presence arm, in a different setting.
+
+### 3.51 Guo, Wang, Fei, Li, Chen, Jin 2026 (AMGFormer), arXiv. Doi `10.48550/arxiv.2601.19349` (from candidates.csv, `W7125970824`)
+- **Status**: read in full (arXiv `2601.19349` v1, 5 pages in conference format). Table 1 checked on a rendered image of page 4, reference [12] on page 5.
+- **Data and split**: BraTS 2018, 2020 and 2021. Splits not stated. 128³ crops, 300 epochs, batch 2. "Missing modalities are simulated using 15 combinations during training."
+- **Arms**: DRNet, ACDIS, M2FTrans, IAIDNet, GSS, numbers apparently copied (DRNet's have one decimal). Not stated.
+- **Patterns and metrics**: all 15 on BraTS 2018. Dice only. "Statistical significance confirmed (p<0.001)", test and comparison not named. No seeds.
+- **Result as printed**: ET 67.00 to 67.46, TC 82.11 to 83.14, WT 89.22 to 89.47 in **every** pattern, including T1 alone (ET 67.28) and complete input (ET 67.12).
+- **Problems found**:
+  - The flat results are implausible next to every other paper read: enhancing tumour without T1c is 26 to 48 elsewhere, and a model should gain from complete input. The paper gives no explanation. I cannot tell from the paper whether modalities were really removed at test time; this is a doubt, not a finding.
+  - Its "variance" means a range (">40%" is 37.24 to 82.19).
+  - Reference [12] gives RFNet as "Y. Shen et al.", MICCAI 2022, pp. 425 to 435 (confirmed on the page image); RFNet is Ding, Yu, Yang, ICCV 2021 (note 3.25).
+- **Closeness score (full text)**: 2 (A, B).
+- **Gap (section 5)**: does not narrow it. Not citable for any number.
+
+### 3.52 Kang, Ting, Saw, Phan, Ge, Ting 2026 (MMTSeg), IEEE Transactions on Artificial Intelligence 7(9), 5076 onwards. Doi `10.1109/tai.2026.3678550` (from candidates.csv, `W4395065550`)
+- **Status**: read (journal PDF, 15 pages): method, metrics, setup, Tables I to IV closely; the Mamba and distillation module details and the ablation tables skimmed. Tables I and IV checked on rendered images of pages 8 and 10.
+- **Data and split**: BraTS 2018 (285) and BraTS 2020 (369). **The train, validation and test split is not stated.** 128³ crops, 1,000 epochs, batch 1, Adam.
+- **Method**: per modality encoders distilled from a complete input branch, Mamba plus transformer fusion, a boundary based loss (generalised surface loss). Modality features are "randomly dropped" in training; the rate is not given.
+- **Arms**: HeMIS, U-HVED, RobustSeg, D2-Net, RFNet, mmFormer, M3AE. Where their numbers come from is not stated. Table II reruns mmFormer and M3AE with the surface loss; both get worse.
+- **Patterns and metrics**: all 15. Balanced average Hausdorff distance (bAHD) per region and pattern; Dice only as means (Table III). No test, no seeds.
+- **Result (BraTS 2018)**: mean bAHD 4.14, 6.24, 3.75 mm (WT, TC, ET); mean Dice 87.50, 72.58, 64.63, with TC below M3AE's 77.39.
+- **Problems found (my arithmetic, confirmed on the page images)**:
+  - Table IV (BraTS 2020), U-HVED, TC: 13 of its 15 cells equal Table I (BraTS 2018), HeMIS, WT (23.70, 16.07, 15.89, 42.10, ... 12.13); only two cells differ (47.13 against 57.13, 65.51 against 85.51). The two HeMIS TC rows share 8 cells, and most of the rest differ by exactly 1 or 2 (35.31 against 33.31, 25.07 against 23.07). Different methods and datasets should not give the same numbers.
+  - Printed means that do not match their rows beyond rounding: Table I, TC, RobustSeg 10.02 (cells 10.54); Table I, WT, U-HVED 23.18 (23.11); Table IV, WT, D2-Net 13.40 (13.28); Table IV, TC, RobustSeg 11.83 (12.49); Table IV, ET, HeMIS 15.94 (16.03).
+  - The text gives the WT bAHD as 4.41; Table I says 4.14. The text says "As shown in Table I, we use the Dice score"; Table I is bAHD.
+- **Closeness score (full text)**: 3 (A, B, F).
+- **Gap (section 5)**: does not narrow it.
+
 ## 4. Record of this search
 
 - 16 logged searches: the 8 fixed queries, then 8 title searches for web finds and for known papers. 387 candidates.
@@ -686,6 +850,25 @@ Bibliographic details below are copied from the papers. None is in `writing/refs
 - TMFormer (3.41) was picked by citation chasing (a baseline in 3.34 and 3.35), after MAVP, the higher scored pick, failed to download.
 - Some notes say which parts were read closely and which skimmed (3.33, 3.34, 3.36, 3.38, 3.40). All ten were opened and their method, setup and main tables read.
 
+- Fifth round (2026-11-21, later the same day): 2 more logged searches, so 38 logged searches and 747 candidates.
+  - None of the six papers asked of the human (GlioMODA, Qiu 2025, MAVP, M2FTrans, PMKL, `W4381326261`) was in `~/literature-pdfs` or found by name in `~/Downloads`.
+  - "PMR prototypical modal rebalance multimodal learning": answered first try, no 429. 180 hits, 46 new. PMR is `W4386076642` (CVPR 2023), general multimodal learning, **out** by section 1, not read. The other 45 new rows are general multimodal balancing papers, out by title.
+  - The RFNet title: answered first try, no 429. 125 hits, 1 new (FMC-Net, `W7235976173`, not read). **Correction to the fourth round**: RFNet's row was not missing; it is `W3203934147`, status `no_open_copy`, already in `candidates.csv` (note 3.25 took its DOI from it). It was read from the CVF site, as note 3.25 says.
+  - Not logged in `search-log.csv` because they are not searches: abstracts of 18 candidates fetched one by one from the OpenAlex work endpoint (a scratch script, standard library), to score them; 3 had no abstract in OpenAlex (`W7128725314`, `W7214395715`, `W7166641782`). For downloaded papers without one, the abstract was read from the PDF.
+- A title screen of all `new`, `ok` and `no_open_copy` rows for brain tumour plus missing or incomplete modality words (178 titles, matched by keyword, so a paper with an unusual title can be missed) found unread in scope candidates not on the section 6 list. This screen, not section 6 alone, chose most of the batch.
+- 19 papers requested through the tool: 13 downloaded, of which 11 were read; `failed`: SSRN `W7128725314`, preprints.org `W7223822372`, Frontiers `W7165058964`, MDPI `W4413174812`; `not_pdf`: PMC `W4390872190`, BMC `W7204836977`.
+- Abstract scores (section 1, from the abstract only, from OpenAlex or the PDF): NeuroWeave-3D 2 (A, B); AMGFormer 2 (A, B: 15 combinations); NeuroMesh 1 (A); DeMoSeg 1 (A); hierarchical in-out fusion 1 (A); UniME 1 (A); CausalDisenSeg 1 (A); MMTSeg 1 (A); Fail-SafeAI 1 (A); UAF-AIMM 1 (A; Dice and HD95 but no regions); Bayesian U-Net with modality dropout 1 (A); confidence-aware nnU-Net 1 (A); SMML 0 (no dataset named); dual-stage 0 (no dataset named); meta-learning 0; MSAM 0 (glioma with DTI, no BraTS named); ResUNet50 modality dropout 0. MMA-LTS 1 (A: BraTS 2020 and FeTS 2024) and set-inclusive uncertainty 1 (A: BraTS 2018 and 2020), both from the PDF abstract, since OpenAlex has none.
+- Read: 11 (3.42 to 3.52). Order chosen by section 1's tie rule (papers that compare strategies before new networks), then by score and open copy. MMTSeg (3.52) was added last so that 50 are in scope without counting NeuroWeave-3D.
+- Screened and **out** by section 1, not counted:
+  - "Stress testing spatial routing of synthesised T1ce ... using two-dimensional procedural phantoms" (`W7215032042`): procedural phantoms, not brain tumour MRI. Abstract only. Its statistics (two locked 16-seed studies, Holm correction) are the best seen in this round, but the data rule puts it out.
+  - PMR (`W4386076642`): general multimodal learning, not segmentation of brain tumour MRI.
+- Web searches in this round: 0.
+
+**Departures in the fifth round, stated plainly:**
+- Most of the ten were picked from a title screen of `candidates.csv`, not from the section 6 list. Section 1 scoring was done from abstracts for 18 candidates picked by title, not across all 747.
+- SMML and dual-stage scored 0 from their abstracts but were read: the higher scored ones with no open copy could not be read, and these two are recent, in scope and open.
+- NeuroWeave-3D (3.43) is counted as read, but it is mostly a study plan whose printed numbers have no stated source, so whether it is in scope is doubtful. With it, 51 papers are in scope; without it, 50 (see section 6).
+
 **Departures from section 1, stated plainly (rounds one and two):**
 - Not all 387 were screened. Titles of the first 322 were filtered by keyword, which left 113, and I read those titles. A paper with an unusual title could be missed.
 - The 10 were chosen from titles, abstracts and web results, not a formal abstract score across all candidates. After reading, Grøvik scored 0 and Pemberton, Ruffle and LASSNet scored 2. So "the 10 closest" is not strictly true. Better candidates may be in the next list.
@@ -719,9 +902,20 @@ Checked 2026-11-21 against papers 22 to 31: none of them narrows this gap (see "
 Checked 2026-11-21 against papers 32 to 41: none narrows the complete input cost gap. No paper trains the same backbone with and without all subset dropout and compares them at complete input. One framing point changes:
 5. **Not "first on BraTS 2023".** IM-Fuse (3.32) already retrained seven methods on BraTS 2023 GLI at 128³ with a validation split. Our wording must claim a controlled comparison of training strategies on one backbone, with seeds, paired tests and a sealed test set. It must not claim to be the first study on this dataset. This is a wording point for `/architect` and the chapters, not a protocol change.
 
+Checked 2026-11-21 against papers 42 to 52: none narrows the complete input cost gap. Paper by paper, in note order: NeuroMesh (3.42) no, every arm has dropout; NeuroWeave-3D (3.43) no run, but its plan covers the same comparison, so it is a watch item; MMA-LTS (3.44) no; set-inclusive uncertainty (3.45) no; UniME (3.46) no, but a second BraTS 2023 method benchmark, which supports point 5; DeMoSeg (3.47) no; SMML (3.48) no; hierarchical in-out fusion (3.49) no; dual-stage (3.50) no, incomplete training data, one small presence indicator result; AMGFormer (3.51) no, results implausible; MMTSeg (3.52) no.
+6. **Watch NeuroWeave-3D.** If a later version reports its planned complete input model against dropout with paired tests and seeds, our claim on the complete input cost must cite and answer it. Nothing to change now.
+
 ## 6. Next
 
-41 of at least 50 papers read: 40 in scope plus ModDrop as background. Papers 32 to 41 read 2026-11-21. Read next:
+52 papers read, so the gate count of at least 50 is reached: 51 in scope plus ModDrop as background. Papers 42 to 52 read 2026-11-21. NeuroWeave-3D (3.43) is mostly a study plan whose numbers have no stated source, so its scope is doubtful; without it, 50 are in scope. So the count holds whether or not ModDrop or NeuroWeave-3D is counted. Reaching the count is not passing the gate: AC-19 passes only when you write `test-gate.md` with `status: pass`.
+
+**For `docs/literature/test-gate.md` (AC-19 of spec 0006; you write this file, the AI does not)**. It needs one `key: value` line each for `status`, `date`, `papers_read`, `cai_status` and `citation_search`, and passes only with `status: pass` and `papers_read` of at least 50. What the review can tell you for each:
+- `papers_read`: 52 read; 51 in scope; 50 in scope without NeuroWeave-3D.
+- `cai_status`: still not confirmed as peer reviewed. The Zenodo record says "submitted to Journal of Imaging", the manuscript says MDPI Bioengineering. Only you can check the journal sites and Google Scholar.
+- `citation_search`: not done for Cai et al. (no OpenAlex id for the paper itself, only its Zenodo code record `W7213346182`, 0 citers). Done by hand for Öchsner (`W7171498209`, 1 citing work, out of scope).
+- `status`: AC-19 says a closer paper found by the gate goes through `/architect` and AC-31 before any test number exists. None of the 52 is closer to our design than Cai et al. NeuroWeave-3D plans a close comparison but reports no run. GlioMODA, the most promising unread paper, is still closed. Whether that is enough for `pass` is your call.
+
+Read next (beyond the gate):
 - **For the human (no open copy found)**, in order of closeness:
   - GlioMODA, "GlioMODA: Robust glioma segmentation in clinical routine", Neuro-Oncology Advances 2026, `W7128715154`, doi `10.1093/noajnl/vdag034` (from candidates.csv). By its abstract: BraTS 2021, 11 protocol combinations, Wilcoxon signed rank tests with Benjamini–Yekutieli correction. The tool download failed (OUP); no arXiv match. **The most promising unread paper for the benchmark question.**
   - Qiu et al. 2025, "Does Adding a Modality Really Make Positive Impacts in Incomplete Multi-Modal Brain Tumor Segmentation?", TMI, `W4406137843`, doi `10.1109/tmi.2025.3526818`. Still not in `~/literature-pdfs`. IM-Fuse's reference [25] is a different Qiu paper (MAVP, 2023), so no new route.
@@ -730,12 +924,16 @@ Checked 2026-11-21 against papers 32 to 41: none narrows the complete input cost
   - PMKL, TMI, `W3206034503`, doi `10.1109/tmi.2021.3119385`. Still not in `~/literature-pdfs`.
   - "Brain Tumor Segmentation for Multi-Modal MRI with Missing Information", `W4381326261`, doi `10.1007/s10278-023-00860-7`. Open on PMC (PMC10501967), but the tool got `not_pdf` and Europe PMC answered HTTP 500 twice. A browser download by the human should work.
   - Feng (ModDrop in MS): the human should give the full title or authors.
-- Open, in scope, not read yet (picked by title; score from the abstract first): Multi-View Global Perception (`W7128725314`), Decoupling ego and other modalities (`W4406259532`, arXiv), Semantic-guided Masked Mutual Learning (`W4409366865`, AAAI), Hierarchical in-out fusion (`W4411856088`, Scientific Reports), and the 2026 titles on calibration and uncertainty under missing modalities (`W7214395715`, `W7166641782`, `W7167590398`; no abstracts in OpenAlex).
+  - Two closed papers whose main subject is modality dropout, so close to RQ2 (added 2026-11-21): "A 2D ResUNet50-Based Modality Dropout Framework for Brain Tumor Segmentation", ICAAIC 2025, `W7124938364`, doi `10.1109/icaaic64647.2025.11330668`; "Uncertainty-Aware Brain Tumor Segmentation using Bayesian U-Net and Modality Dropouts", IEEE INDICON 2025, `W7130678113`, doi `10.1109/indicon68490.2025.11392881`. The second's abstract claims Dice 0.9508 and 0.9623 on BraTS 2019 and 2020, which is unusually high; unverified.
+  - Downloads that failed this round (open on the publisher site, a browser should work): Fail-SafeAI, preprints.org, `W7223822372`, doi `10.20944/preprints202610.2625.v1` (per channel dropout on FLAIR and T1c, compares against AdaMM); UAF-AIMM, Frontiers in Neuroscience, `W7165058964`, doi `10.3389/fnins.2026.1828237` (missing T1c, Dice and HD95); Multi-View Global Perception, SSRN, `W7128725314`, doi `10.2139/ssrn.6183514`; MSAM, Bioengineering, `W4413174812`, doi `10.3390/bioengineering12080871` (missing modality training against U-Net); meta-learning, ICCV 2023, `W4390872190`, doi `10.1109/iccv51070.2023.01958` (PMC copy, `not_pdf`).
+- Open list from the fourth round: done. Read as 3.44 (`W7214395715`), 3.45 (`W7166641782`), 3.47 (`W4406259532`), 3.48 (`W4409366865`), 3.49 (`W4411856088`). `W7128725314` failed (above). `W7167590398` (confidence-aware nnU-Net with synthesis, iCoMET) is closed.
+- Open, in scope, downloaded, not read (abstract score 1 each): CausalDisenSeg (`W7154598557`, arXiv), virtual nodes graph network (`W7161675152`, arXiv). MMTSeg was read as 3.52. The fifth round title screen matched 178 titles by keyword (section 4); many are already read or out of scope (classification, radiomics), and the rest are not yet scored from their abstracts.
 - Reviews: Zhou 2023 survey (`W4313340471`, closed), a 2026 review (`W7138904805`), and the two failed downloads (`W4410086815`, `W4407980026`).
-- Out of scope, open on arXiv, read only if a strategy paper relies on them: SMIL (`2103.05677`), PMR (`2211.07089`). The PMR title search is still not logged (429).
+- Out of scope, open on arXiv, read only if a strategy paper relies on them: SMIL (`2103.05677`), PMR (`2211.07089`, now logged as `W4386076642`).
 - **Forward citations of Cai et al. and Öchsner et al. (proposal, not built):**
   - Smallest route: a `cites` subcommand in `fetch_papers.py` that calls OpenAlex `filter=cites:<id>`, adds new rows to `candidates.csv` and logs one line to `search-log.csv` like a search. Standard library only, toy tests like the existing ones. This is a tool addition, so it needs an amendment to ADR 0003 first.
   - Evidence so far (by hand, 2026-11-21): two `cites:` requests answered HTTP 200 while search returned 429. Two requests do not show that the filter is never throttled.
   - Öchsner (`W7171498209`): 1 citing work, out of scope. Cai: `candidates.csv` has only the Zenodo code record (`W7213346182`, 0 citers). The paper itself needs its own OpenAlex id (or its arXiv id) before its citations can be chased. The human could confirm where Cai et al. is published.
   - A free OpenAlex key (ADR 0003, set by the human in an environment variable) would end the 429 errors for both search and citations.
-- **A real benchmark is still needed.** IM-Fuse (3.32) is the best method benchmark so far (BraTS 2023, retrained, validation split), but not a strategy benchmark: recipes differ by arm, Dice only, one run, no test. AdaMM (3.31) and 3.15 are not ones either. GlioMODA is the next candidate.
+- **A real strategy benchmark is still not found.** IM-Fuse (3.32) and UniME (3.46) are method benchmarks on BraTS 2023 (retrained, validation split), not strategy benchmarks: recipes differ by arm, Dice only, one run, no test. AdaMM (3.31) and 3.15 are not ones either. GlioMODA is the next candidate.
+- **Watch item**: NeuroWeave-3D (3.43), bioRxiv `10.64898/2026.10.29.762804`. Check for a version with real results before the thesis and the journal paper are submitted.
