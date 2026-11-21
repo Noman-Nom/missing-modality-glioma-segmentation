@@ -556,11 +556,10 @@ Checked 2026-11-21 against papers 22 to 31: none of them narrows this gap (see "
 ## 6. Next
 
 31 of at least 50 papers read, 30 in scope plus ModDrop as background (papers 22 to 31 read 2026-11-21). Read next:
-- Downloaded, not read: none.
+- Downloaded, not read: IM-Fuse (`W4414351039`), fetched 2026-11-21 from the MICCAI 2025 open access site (`papers.miccai.org/miccai-2025/paper/0747_paper.pdf`), title checked in the PDF, saved as `~/literature-pdfs/W4414351039.pdf` with a text copy. Its candidates.csv row still says `not_pdf`.
 - **For the human (no open copy found)**:
-  - Qiu et al. 2025, "Does Adding a Modality Really Make Positive Impacts in Incomplete Multi-Modal Brain Tumor Segmentation?", TMI, `W4406137843`, doi `10.1109/tmi.2025.3526818`. Not on arXiv by title. The closest title to our question so far.
-  - PMKL, "Learning With Privileged Multimodal Knowledge for Unimodal Segmentation", TMI, `W3206034503`, doi `10.1109/tmi.2021.3119385`.
-  - IM-Fuse, `W4414351039`, doi `10.1007/978-3-032-04984-1_22`: the open link is not a PDF, and there is no arXiv match by title.
+  - Qiu et al. 2025, "Does Adding a Modality Really Make Positive Impacts in Incomplete Multi-Modal Brain Tumor Segmentation?", TMI, `W4406137843`, doi `10.1109/tmi.2025.3526818`. Not on arXiv by title; a web search (2026-11-21) found only abstract pages, no open copy. The closest title to our question so far.
+  - PMKL, "Learning With Privileged Multimodal Knowledge for Unimodal Segmentation", TMI, `W3206034503`, doi `10.1109/tmi.2021.3119385`. A web search (2026-11-21) found only the code repository and abstract pages, no open copy.
   - M2FTrans: not in `candidates.csv` (the title search failed with 429) and no arXiv match. AdaMM's reference list gives it as Shi, Yu, Cheng, Yang, Cheng, Yan, "M2FTrans: Modality-masked fusion transformer for incomplete multi-modality brain tumor segmentation", IEEE Journal of Biomedical and Health Informatics 28 (2023) 379 to 390 (not checked; no DOI taken from it). Retry the title search first; ask only if it still has no open copy.
   - Feng (ModDrop in MS): not found by a guessed title. The human should give the full title or authors.
 - Out of scope, open on arXiv, read only if a strategy paper relies on them: SMIL (`2103.05677`), PMR (`2211.07089`).
